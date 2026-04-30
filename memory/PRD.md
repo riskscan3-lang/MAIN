@@ -27,7 +27,8 @@ User uploaded a `src/`-only React + TypeScript + Tailwind + shadcn project (XMRM
 - ✅ Wired uploaded `src/*` (TSX) into `/app/frontend`; installed TypeScript + viem; created `tsconfig.json`; removed conflicting `jsconfig.json`.
 - ✅ Backend: `POST /api/contact`, `GET /api/contact` with `EmailStr` validation.
 - ✅ Backend: `POST /api/purchases`, `GET /api/purchases?buyer_address=…` with strict validation: address + tx_hash regex, `Literal[1,56,137]` chains, `Literal["USDT","NATIVE"]` token types.
-- ✅ Frontend: `WalletContext` (connect/disconnect/chain switch/event listeners), `ConnectWalletButton` (wallet pill with live indicator), `BuyPlanModal` (network selector, USDT/native toggle, summary, pay flow with explorer link), `LiveTicker` (animated payout marquee).
+- ✅ Frontend: `WalletContext` (connect/disconnect/chain switch/event listeners), `ConnectWalletButton` (wallet pill with live indicator), `BuyPlanModal` with two-stage UX (payment → **Activation Pending** view), `LiveTicker` (animated payout marquee).
+- ✅ Activation Pending experience: confirmation hero, ETA countdown per chain, tx hash with copy + explorer link, **referral code** derived from buyer wallet, share to **X** and **Telegram** with prefilled text + ref link, Open Dashboard CTA.
 - ✅ Visual polish: ambient gradient mesh, glow rings around Hero stats card, shimmer "MOST POPULAR" badge, hover-lift on Plan cards, gradient icon cards, custom orange scrollbar, custom selection color, fine grid overlay.
 - ✅ Footer legal/company links wired to actual page navigation.
 - ✅ Backend tested: 14/14 pytest cases pass (health, contact success/validation, purchases across chains/tokens, validation, listing, address filter).

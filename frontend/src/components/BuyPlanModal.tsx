@@ -1,6 +1,9 @@
 // @ts-nocheck
-import { useState, useMemo } from "react";
-import { Wallet, Loader2, ExternalLink, CheckCircle2, AlertTriangle, X } from "lucide-react";
+import { useState, useMemo, useEffect } from "react";
+import {
+  Wallet, Loader2, ExternalLink, CheckCircle2, AlertTriangle, X,
+  Copy, Check, Twitter, Send as SendIcon, Sparkles,
+} from "lucide-react";
 import { Button } from "./ui/button";
 import { useWallet } from "../context/WalletContext";
 import {
@@ -15,25 +18,63 @@ import {
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
-// Approximate USDT-equivalent per plan; native amounts are tiny dev-friendly defaults
 const PLAN_PRICING = {
   1: { name: "Starter", usdt: 2499, native: 0.001 },
   2: { name: "Professional", usdt: 4999, native: 0.002 },
   3: { name: "Enterprise", usdt: 8499, native: 0.003 },
 };
 
-export function BuyPlanModal({ planId, onClose }) {
+// Approx confirmation ETA seconds per chain
+const CHAIN_ETA = { 1: 180, 137: 30, 56: 15 };
+
+const buildReferralCode = (address) => {
+  if (!address) return "XMRMINE";
+  const tail = address.replace("0x", "").slice(-6).toUpperCase();
+  return `XMR-${tail}`;
+};
+
+const buildShareText = (planName, refCode) =>
+  `Just activated my ${planName} plan on XMRMine Pro 🚀⛏️ Earning passive Monero with zero hardware. Use my ref code ${refCode} for a 5% bonus → `;
+
+export function BuyPlanModal({ planId, onClose, onSuccess }) {
   const wallet = useWallet();
   const [chainId, setChainId] = useState(1);
-  const [tokenType, setTokenType] = useState("USDT"); // 'USDT' | 'NATIVE'
+  const [tokenType, setTokenType] = useState("USDT");
   const [submitting, setSubmitting] = useState(false);
   const [txHash, setTxHash] = useState(null);
   const [error, setError] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const [secondsLeft, setSecondsLeft] = useState(0);
 
   const plan = PLAN_PRICING[planId] || PLAN_PRICING[2];
   const selectedChain = useMemo(() => SUPPORTED_CHAINS.find((c) => c.id === chainId), [chainId]);
   const amount = tokenType === "USDT" ? plan.usdt : plan.native;
   const amountLabel = tokenType === "USDT" ? `${plan.usdt} USDT` : `${plan.native} ${selectedChain?.nativeSymbol}`;
+  const referralCode = useMemo(() => buildReferralCode(wallet.address), [wallet.address]);
+
+  useEffect(() => {
+    if (!txHash) return;
+    setSecondsLeft(CHAIN_ETA[chainId] || 60);
+    const interval = setInterval(() => {
+      setSecondsLeft((s) => (s > 0 ? s - 1 : 0));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [txHash, chainId]);
+
+  const formatEta = (s) => {
+    if (s <= 0) return "Confirming…";
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return m > 0 ? `${m}m ${sec.toString().padStart(2, "0")}s` : `${sec}s`;
+  };
+
+  const copyHash = async () => {
+    try {
+      await navigator.clipboard.writeText(txHash);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch (_) {}
+  };
 
   const handleConnect = async () => {
     setError(null);
@@ -55,7 +96,6 @@ export function BuyPlanModal({ planId, onClose }) {
 
       setTxHash(hash);
 
-      // Record on backend
       try {
         await fetch(`${API}/purchases`, {
           method: "POST",
@@ -71,7 +111,6 @@ export function BuyPlanModal({ planId, onClose }) {
           }),
         });
       } catch (e) {
-        // non-blocking
         console.warn("Backend record failed", e);
       }
     } catch (e) {
@@ -84,11 +123,11 @@ export function BuyPlanModal({ planId, onClose }) {
   return (
     <div
       data-testid="buy-plan-modal"
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in"
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-lg bg-gradient-to-br from-slate-900 to-slate-950 border border-orange-500/30 rounded-2xl shadow-2xl shadow-orange-500/10 overflow-hidden"
+        className="relative w-full max-w-lg bg-gradient-to-br from-slate-900 to-slate-950 border border-orange-500/30 rounded-2xl shadow-2xl shadow-orange-500/10 overflow-hidden max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -105,148 +144,233 @@ export function BuyPlanModal({ planId, onClose }) {
               <Wallet className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h3 className="text-lg font-bold">Activate {plan.name}</h3>
-              <p className="text-xs text-slate-400">Pay with crypto · Instant activation</p>
+              <h3 className="text-lg font-bold">{txHash ? `${plan.name} activated` : `Activate ${plan.name}`}</h3>
+              <p className="text-xs text-slate-400">{txHash ? "Pending confirmation on-chain" : "Pay with crypto · Instant activation"}</p>
             </div>
           </div>
         </div>
 
         <div className="p-6 space-y-5">
-          {/* Step 1: Wallet */}
-          {!wallet.isConnected ? (
-            <div>
-              <p className="text-sm text-slate-400 mb-3">Connect your wallet to continue</p>
+          {!txHash && (
+            <>
+              {/* Wallet connection state */}
+              {!wallet.isConnected ? (
+                <div>
+                  <p className="text-sm text-slate-400 mb-3">Connect your wallet to continue</p>
+                  <Button
+                    data-testid="modal-connect-wallet"
+                    onClick={handleConnect}
+                    disabled={wallet.connecting}
+                    className="w-full bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 py-6 font-semibold"
+                  >
+                    {wallet.connecting ? (
+                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Connecting…</>
+                    ) : (
+                      <><Wallet className="w-4 h-4 mr-2" /> Connect MetaMask</>
+                    )}
+                  </Button>
+                  {wallet.error && (
+                    <p className="text-xs text-red-400 mt-2">{wallet.error}</p>
+                  )}
+                </div>
+              ) : (
+                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wider text-slate-500">Connected wallet</p>
+                    <p className="font-mono text-sm" data-testid="connected-address">{shortAddress(wallet.address)}</p>
+                  </div>
+                  <span className="text-xs px-2 py-1 rounded-full bg-green-500/15 text-green-400 border border-green-500/30">Live</span>
+                </div>
+              )}
+
+              {/* Chain selector */}
+              <div>
+                <p className="text-xs uppercase tracking-wider text-slate-500 mb-2">Select network</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {SUPPORTED_CHAINS.map((c) => (
+                    <button
+                      key={c.id}
+                      data-testid={`chain-${c.id}`}
+                      onClick={() => setChainId(c.id)}
+                      className={`relative px-3 py-3 rounded-xl border text-sm font-medium transition-all ${
+                        chainId === c.id
+                          ? "border-orange-500 bg-gradient-to-br from-orange-500/15 to-amber-500/10 text-white"
+                          : "border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700"
+                      }`}
+                    >
+                      <div className="flex flex-col items-center gap-1">
+                        <span className="font-bold">{c.name}</span>
+                        <span className="text-[10px] text-slate-500">{c.nativeSymbol}</span>
+                      </div>
+                      {chainId === c.id && (
+                        <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-orange-500 border-2 border-slate-950" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Token */}
+              <div>
+                <p className="text-xs uppercase tracking-wider text-slate-500 mb-2">Pay with</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    data-testid="token-usdt"
+                    onClick={() => setTokenType("USDT")}
+                    className={`px-3 py-3 rounded-xl border text-sm font-medium transition-all ${
+                      tokenType === "USDT"
+                        ? "border-emerald-500 bg-emerald-500/10 text-white"
+                        : "border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700"
+                    }`}
+                  >
+                    USDT <span className="text-[10px] text-slate-500 block">Stablecoin</span>
+                  </button>
+                  <button
+                    data-testid="token-native"
+                    onClick={() => setTokenType("NATIVE")}
+                    className={`px-3 py-3 rounded-xl border text-sm font-medium transition-all ${
+                      tokenType === "NATIVE"
+                        ? "border-orange-500 bg-orange-500/10 text-white"
+                        : "border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700"
+                    }`}
+                  >
+                    {selectedChain?.nativeSymbol} <span className="text-[10px] text-slate-500 block">Native</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Summary */}
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2 text-sm">
+                <div className="flex items-center justify-between text-slate-400">
+                  <span>Plan</span>
+                  <span className="text-white font-medium">{plan.name}</span>
+                </div>
+                <div className="flex items-center justify-between text-slate-400">
+                  <span>Network</span>
+                  <span className="text-white font-medium">{selectedChain?.name}</span>
+                </div>
+                <div className="flex items-center justify-between text-slate-400">
+                  <span>Recipient</span>
+                  <span className="font-mono text-xs text-white">{shortAddress(RECIPIENT_ADDRESS)}</span>
+                </div>
+                <div className="border-t border-slate-800 pt-2 flex items-center justify-between">
+                  <span className="text-slate-400">You pay</span>
+                  <span className="text-lg font-bold text-orange-400" data-testid="pay-amount">{amountLabel}</span>
+                </div>
+              </div>
+
               <Button
-                data-testid="modal-connect-wallet"
-                onClick={handleConnect}
-                disabled={wallet.connecting}
-                className="w-full bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 py-6 font-semibold"
+                data-testid="modal-pay-button"
+                onClick={handlePay}
+                disabled={!wallet.isConnected || submitting}
+                className="w-full bg-gradient-to-r from-orange-500 via-amber-500 to-yellow-500 hover:from-orange-600 hover:via-amber-600 hover:to-yellow-600 py-6 font-bold text-base shadow-lg shadow-orange-500/30 disabled:opacity-50"
               >
-                {wallet.connecting ? (
-                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Connecting…</>
+                {submitting ? (
+                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Awaiting confirmation…</>
                 ) : (
-                  <><Wallet className="w-4 h-4 mr-2" /> Connect MetaMask</>
+                  <>Pay {amountLabel}</>
                 )}
               </Button>
-              {wallet.error && (
-                <p className="text-xs text-red-400 mt-2">{wallet.error}</p>
-              )}
-            </div>
-          ) : (
-            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
-              <div>
-                <p className="text-[11px] uppercase tracking-wider text-slate-500">Connected wallet</p>
-                <p className="font-mono text-sm" data-testid="connected-address">{shortAddress(wallet.address)}</p>
-              </div>
-              <span className="text-xs px-2 py-1 rounded-full bg-green-500/15 text-green-400 border border-green-500/30">Live</span>
-            </div>
+            </>
           )}
 
-          {/* Step 2: Chain selector */}
-          <div>
-            <p className="text-xs uppercase tracking-wider text-slate-500 mb-2">Select network</p>
-            <div className="grid grid-cols-3 gap-2">
-              {SUPPORTED_CHAINS.map((c) => (
-                <button
-                  key={c.id}
-                  data-testid={`chain-${c.id}`}
-                  onClick={() => setChainId(c.id)}
-                  className={`relative px-3 py-3 rounded-xl border text-sm font-medium transition-all ${
-                    chainId === c.id
-                      ? "border-orange-500 bg-gradient-to-br from-orange-500/15 to-amber-500/10 text-white"
-                      : "border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700"
-                  }`}
-                >
-                  <div className="flex flex-col items-center gap-1">
-                    <span className="font-bold">{c.name}</span>
-                    <span className="text-[10px] text-slate-500">{c.nativeSymbol}</span>
-                  </div>
-                  {chainId === c.id && (
-                    <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-orange-500 border-2 border-slate-950" />
-                  )}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Step 3: Token */}
-          <div>
-            <p className="text-xs uppercase tracking-wider text-slate-500 mb-2">Pay with</p>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                data-testid="token-usdt"
-                onClick={() => setTokenType("USDT")}
-                className={`px-3 py-3 rounded-xl border text-sm font-medium transition-all ${
-                  tokenType === "USDT"
-                    ? "border-emerald-500 bg-emerald-500/10 text-white"
-                    : "border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700"
-                }`}
-              >
-                USDT <span className="text-[10px] text-slate-500 block">Stablecoin</span>
-              </button>
-              <button
-                data-testid="token-native"
-                onClick={() => setTokenType("NATIVE")}
-                className={`px-3 py-3 rounded-xl border text-sm font-medium transition-all ${
-                  tokenType === "NATIVE"
-                    ? "border-orange-500 bg-orange-500/10 text-white"
-                    : "border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700"
-                }`}
-              >
-                {selectedChain?.nativeSymbol} <span className="text-[10px] text-slate-500 block">Native</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Summary */}
-          <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2 text-sm">
-            <div className="flex items-center justify-between text-slate-400">
-              <span>Plan</span>
-              <span className="text-white font-medium">{plan.name}</span>
-            </div>
-            <div className="flex items-center justify-between text-slate-400">
-              <span>Network</span>
-              <span className="text-white font-medium">{selectedChain?.name}</span>
-            </div>
-            <div className="flex items-center justify-between text-slate-400">
-              <span>Recipient</span>
-              <span className="font-mono text-xs text-white">{shortAddress(RECIPIENT_ADDRESS)}</span>
-            </div>
-            <div className="border-t border-slate-800 pt-2 flex items-center justify-between">
-              <span className="text-slate-400">You pay</span>
-              <span className="text-lg font-bold text-orange-400" data-testid="pay-amount">{amountLabel}</span>
-            </div>
-          </div>
-
-          {/* CTA */}
-          {txHash ? (
-            <div data-testid="tx-success" className="bg-green-500/10 border border-green-500/30 rounded-xl p-4">
-              <div className="flex items-center gap-2 text-green-400 font-medium mb-2">
-                <CheckCircle2 className="w-5 h-5" /> Transaction submitted
+          {/* Activation Pending View */}
+          {txHash && (
+            <div data-testid="activation-view" className="space-y-5 animate-fade-in-up">
+              <div className="relative text-center pt-2">
+                <div className="absolute inset-x-0 top-0 mx-auto w-32 h-32 bg-green-500/20 rounded-full blur-3xl" />
+                <div className="relative inline-flex items-center justify-center w-20 h-20 rounded-full bg-gradient-to-br from-green-500/20 to-emerald-500/20 border border-green-500/40 mb-3">
+                  <CheckCircle2 className="w-10 h-10 text-green-400" />
+                </div>
+                <h3 className="text-2xl font-bold mb-1">Activation Pending</h3>
+                <p className="text-sm text-slate-400">Your {plan.name} plan will be live once the transaction confirms.</p>
               </div>
-              <p className="text-xs text-slate-400 mb-2 break-all font-mono">{txHash}</p>
-              <a
-                href={explorerTxUrl(chainId, txHash)}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 text-orange-400 hover:text-orange-300 text-sm"
-              >
-                View on explorer <ExternalLink className="w-3.5 h-3.5" />
-              </a>
+
+              <div className="bg-gradient-to-br from-orange-500/10 to-amber-500/10 border border-orange-500/30 rounded-xl p-4 flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] uppercase tracking-wider text-orange-300 mb-1">Estimated confirmation</p>
+                  <p className="text-2xl font-bold tabular-nums" data-testid="eta-countdown">{formatEta(secondsLeft)}</p>
+                </div>
+                <Sparkles className="w-8 h-8 text-amber-400 animate-float-y" />
+              </div>
+
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-1.5">Transaction hash</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-xs font-mono text-slate-300 truncate" data-testid="tx-hash">{txHash}</code>
+                  <button
+                    data-testid="copy-tx-hash"
+                    onClick={copyHash}
+                    className="p-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300"
+                    title="Copy"
+                  >
+                    {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+                  </button>
+                  <a
+                    href={explorerTxUrl(chainId, txHash)}
+                    target="_blank"
+                    rel="noreferrer"
+                    data-testid="tx-explorer-link"
+                    className="p-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-orange-400"
+                    title="View on explorer"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                  </a>
+                </div>
+              </div>
+
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wider text-slate-500">Your referral code</p>
+                    <p className="text-xl font-bold gradient-text-orange" data-testid="referral-code">{referralCode}</p>
+                  </div>
+                  <span className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-full px-3 py-1">+5% bonus</span>
+                </div>
+                <p className="text-xs text-slate-500 mb-3">Share to earn 10% of every friend's first deposit.</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <a
+                    data-testid="share-twitter"
+                    href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(buildShareText(plan.name, referralCode))}&url=${encodeURIComponent(typeof window !== "undefined" ? window.location.origin : "")}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center justify-center gap-2 px-3 py-3 rounded-xl bg-[#0d1426] border border-slate-800 hover:border-sky-500/50 text-slate-200 text-sm font-medium transition-all"
+                  >
+                    <Twitter className="w-4 h-4 text-sky-400" /> Share on X
+                  </a>
+                  <a
+                    data-testid="share-telegram"
+                    href={`https://t.me/share/url?url=${encodeURIComponent(typeof window !== "undefined" ? window.location.origin : "")}&text=${encodeURIComponent(buildShareText(plan.name, referralCode))}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center justify-center gap-2 px-3 py-3 rounded-xl bg-[#102132] border border-slate-800 hover:border-cyan-500/50 text-slate-200 text-sm font-medium transition-all"
+                  >
+                    <SendIcon className="w-4 h-4 text-cyan-400" /> Share on Telegram
+                  </a>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  data-testid="modal-go-dashboard"
+                  onClick={() => {
+                    if (typeof onSuccess === "function") onSuccess();
+                    onClose();
+                  }}
+                  className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 py-5 font-semibold"
+                >
+                  Open Dashboard
+                </Button>
+                <Button
+                  data-testid="modal-done-button"
+                  variant="outline"
+                  onClick={onClose}
+                  className="border-slate-700 text-slate-300 hover:bg-slate-800 py-5 font-semibold"
+                >
+                  Done
+                </Button>
+              </div>
             </div>
-          ) : (
-            <Button
-              data-testid="modal-pay-button"
-              onClick={handlePay}
-              disabled={!wallet.isConnected || submitting}
-              className="w-full bg-gradient-to-r from-orange-500 via-amber-500 to-yellow-500 hover:from-orange-600 hover:via-amber-600 hover:to-yellow-600 py-6 font-bold text-base shadow-lg shadow-orange-500/30 disabled:opacity-50"
-            >
-              {submitting ? (
-                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Awaiting confirmation…</>
-              ) : (
-                <>Pay {amountLabel}</>
-              )}
-            </Button>
           )}
 
           {error && (
@@ -256,9 +380,11 @@ export function BuyPlanModal({ planId, onClose }) {
             </div>
           )}
 
-          <p className="text-[11px] text-slate-600 text-center leading-relaxed">
-            Demo flow. Verify recipient address before paying. Past performance does not guarantee future results.
-          </p>
+          {!txHash && (
+            <p className="text-[11px] text-slate-600 text-center leading-relaxed">
+              Demo flow. Verify recipient address before paying. Past performance does not guarantee future results.
+            </p>
+          )}
         </div>
       </div>
     </div>
