@@ -15,7 +15,7 @@ export function AboutUs() {
           <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold mb-6">
             About{" "}
             <span className="bg-gradient-to-r from-orange-400 to-amber-400 bg-clip-text text-transparent">
-              XMRMine Pro
+              MONERO RIG
             </span>
           </h1>
           <p className="text-xl text-slate-400 max-w-3xl mx-auto">
@@ -30,7 +30,7 @@ export function AboutUs() {
             <h2 className="text-3xl font-bold mb-6">Our Story</h2>
             <div className="space-y-4 text-slate-400">
               <p>
-                Founded in 2019, XMRMine Pro began with a simple vision: democratize access to cryptocurrency mining. 
+                Founded in 2019, MONERO RIG began with a simple vision: democratize access to cryptocurrency mining. 
                 Our founders, experienced blockchain developers and mining enthusiasts, recognized that the barriers 
                 to entry were too high for most people.
               </p>

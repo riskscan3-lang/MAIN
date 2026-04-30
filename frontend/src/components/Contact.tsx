@@ -72,8 +72,8 @@ export function Contact() {
                   <div>
                     <h3 className="font-semibold mb-1">Email Support</h3>
                     <p className="text-slate-400 text-sm mb-2">Response within 24 hours</p>
-                    <a href="mailto:support@xmrminepro.com" className="text-orange-400 hover:text-orange-300">
-                      support@xmrminepro.com
+                    <a href="mailto:support@monerorig.com" className="text-orange-400 hover:text-orange-300">
+                      support@monerorig.com
                     </a>
                   </div>
                 </div>

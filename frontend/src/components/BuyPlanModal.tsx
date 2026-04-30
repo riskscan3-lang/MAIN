@@ -34,7 +34,7 @@ const buildReferralCode = (address) => {
 };
 
 const buildShareText = (planName, refCode) =>
-  `Just activated my ${planName} plan on XMRMine Pro 🚀⛏️ Earning passive Monero with zero hardware. Use my ref code ${refCode} for a 5% bonus → `;
+  `Just activated my ${planName} plan on MONERO RIG 🚀⛏️ Earning passive Monero with zero hardware. Use my ref code ${refCode} for a 5% bonus → `;
 
 export function BuyPlanModal({ planId, onClose, onSuccess }) {
   const wallet = useWallet();

@@ -17,7 +17,7 @@ export function TermsOfService() {
           <section>
             <h2 className="text-2xl font-bold text-white mb-4">1. Acceptance of Terms</h2>
             <p className="text-slate-400">
-              By accessing or using XMRMine Pro services, you agree to be bound by these 
+              By accessing or using MONERO RIG services, you agree to be bound by these 
               Terms of Service and all applicable laws and regulations. If you do not agree 
               with any of these terms, you are prohibited from using this service.
             </p>
@@ -26,7 +26,7 @@ export function TermsOfService() {
           <section>
             <h2 className="text-2xl font-bold text-white mb-4">2. Service Description</h2>
             <p className="text-slate-400 mb-4">
-              XMRMine Pro provides cloud-based cryptocurrency mining services. Our services include:
+              MONERO RIG provides cloud-based cryptocurrency mining services. Our services include:
             </p>
             <ul className="list-disc list-inside text-slate-400 space-y-2 ml-4">
               <li>Mining plan subscriptions with specified hashrates</li>
@@ -81,7 +81,7 @@ export function TermsOfService() {
           <section>
             <h2 className="text-2xl font-bold text-white mb-4">7. Limitation of Liability</h2>
             <p className="text-slate-400">
-              XMRMine Pro shall not be liable for any indirect, incidental, special, 
+              MONERO RIG shall not be liable for any indirect, incidental, special, 
               consequential, or punitive damages resulting from your use of our services. 
               Cryptocurrency mining involves inherent risks, and past performance does not 
               guarantee future results.
@@ -101,14 +101,14 @@ export function TermsOfService() {
             <h2 className="text-2xl font-bold text-white mb-4">9. Governing Law</h2>
             <p className="text-slate-400">
               These terms shall be governed by the laws of the jurisdiction in which 
-              XMRMine Pro operates, without regard to conflict of law principles.
+              MONERO RIG operates, without regard to conflict of law principles.
             </p>
           </section>
 
           <section>
             <h2 className="text-2xl font-bold text-white mb-4">10. Contact</h2>
             <p className="text-slate-400">
-              For questions about these terms, contact us at legal@xmrminepro.com
+              For questions about these terms, contact us at legal@monerorig.com
             </p>
           </section>
         </div>

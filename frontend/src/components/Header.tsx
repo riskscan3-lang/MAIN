@@ -39,10 +39,10 @@ export function Header({ activeView, setActiveView }: HeaderProps) {
               <Pickaxe className="w-6 h-6 text-white" />
             </div>
             <div>
-              <span className="text-xl font-bold bg-gradient-to-r from-orange-400 via-amber-400 to-yellow-300 bg-clip-text text-transparent">
-                XMRMine Pro
+              <span className="text-xl font-bold bg-gradient-to-r from-orange-400 via-amber-400 to-yellow-300 bg-clip-text text-transparent tracking-tight">
+                MONERO RIG
               </span>
-              <p className="text-[10px] text-slate-500 -mt-1">Professional Mining</p>
+              <p className="text-[10px] text-slate-500 -mt-1 tracking-[0.2em] uppercase">Cloud Mining</p>
             </div>
           </button>
 

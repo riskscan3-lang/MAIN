@@ -18,7 +18,7 @@ export function PrivacyPolicy() {
             <section>
               <h2 className="text-2xl font-bold text-white mb-4">1. Information We Collect</h2>
               <p className="text-slate-400 mb-4">
-                XMRMine Pro collects information you provide directly to us, including:
+                MONERO RIG collects information you provide directly to us, including:
               </p>
               <ul className="list-disc list-inside text-slate-400 space-y-2 ml-4">
                 <li>Account information (email, username, password)</li>
@@ -85,7 +85,7 @@ export function PrivacyPolicy() {
             <section>
               <h2 className="text-2xl font-bold text-white mb-4">7. Contact Us</h2>
               <p className="text-slate-400">
-                For privacy-related inquiries, contact us at privacy@xmrminepro.com
+                For privacy-related inquiries, contact us at privacy@monerorig.com
               </p>
             </section>
           </div>

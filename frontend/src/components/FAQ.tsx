@@ -9,7 +9,7 @@ const faqCategories = [
     title: "GettingStarted",
     questions: [
       {
-        q: "How do I start mining with XMRMine Pro?A:",
+        q: "How do I start mining with MONERO RIG?A:",
         a: "GettingStarted is simple: Choose a plan that fits your budget, deposit USDT to your account, and we'll automatically allocate mining resources to your account. You'll start seeing earnings within minutes of your deposit being confirmed."
       },
       {
@@ -128,7 +128,7 @@ export function FAQ() {
             </span>
           </h1>
           <p className="text-slate-400 text-lg">
-            Everything you need to know about XMRMine Pro and cloud mining
+            Everything you need to know about MONERO RIG and cloud mining
           </p>
         </div>
 
