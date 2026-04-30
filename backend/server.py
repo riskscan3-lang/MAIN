@@ -6,7 +6,7 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
-from typing import List, Optional
+from typing import List, Optional, Literal
 import uuid
 from datetime import datetime, timezone
 
@@ -18,6 +18,13 @@ load_dotenv(ROOT_DIR / '.env')
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Create the main app without a prefix
 app = FastAPI()
@@ -110,11 +117,11 @@ async def list_contact_messages():
 class PurchaseCreate(BaseModel):
     plan_id: str
     plan_name: Optional[str] = None
-    buyer_address: str = Field(min_length=42, max_length=42)
-    amount: str
-    chain: int
-    tx_hash: str = Field(min_length=66, max_length=66)
-    token_type: str  # "USDT" | "NATIVE"
+    buyer_address: str = Field(pattern=r"^0x[a-fA-F0-9]{40}$")
+    amount: str = Field(min_length=1, max_length=64)
+    chain: Literal[1, 56, 137]
+    tx_hash: str = Field(pattern=r"^0x[a-fA-F0-9]{64}$")
+    token_type: Literal["USDT", "NATIVE"]
 
 
 class Purchase(BaseModel):
@@ -167,10 +174,6 @@ app.add_middleware(
 )
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
 
 @app.on_event("shutdown")
