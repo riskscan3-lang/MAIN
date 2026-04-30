@@ -3,6 +3,8 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Pickaxe, Clock, Wallet, Activity, Cpu, Zap, ArrowRight } from "lucide-react";
+import { XmrPriceChart } from "./XmrPriceChart";
+import { WorkerPool } from "./WorkerPool";
 
 interface MiningDashboardProps {
   planId: number | null;
@@ -145,6 +147,11 @@ export function MiningDashboard({ planId }: MiningDashboardProps) {
           </Card>
         </div>
 
+        {/* Real-time XMR Price Chart */}
+        <div className="mb-6">
+          <XmrPriceChart />
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <Card className="lg:col-span-2 bg-slate-900 border-slate-800">
             <CardHeader>
@@ -274,6 +281,11 @@ export function MiningDashboard({ planId }: MiningDashboardProps) {
             </div>
           </CardContent>
         </Card>
+
+        {/* Pool Workers */}
+        <div className="mt-6">
+          <WorkerPool />
+        </div>
       </div>
     </section>
   );

@@ -27,10 +27,14 @@ User uploaded a `src/`-only React + TypeScript + Tailwind + shadcn project (XMRM
 - ✅ Wired uploaded `src/*` (TSX) into `/app/frontend`; installed TypeScript + viem; created `tsconfig.json`; removed conflicting `jsconfig.json`.
 - ✅ Backend: `POST /api/contact`, `GET /api/contact` with `EmailStr` validation.
 - ✅ Backend: `POST /api/purchases`, `GET /api/purchases?buyer_address=…` with strict validation: address + tx_hash regex, `Literal[1,56,137]` chains, `Literal["USDT","NATIVE"]` token types.
-- ✅ Frontend: `WalletContext` (connect/disconnect/chain switch/event listeners), `ConnectWalletButton` (wallet pill with live indicator), `BuyPlanModal` with two-stage UX (payment → **Activation Pending** view), `LiveTicker` (animated payout marquee).
+- ✅ Backend: `GET /api/xmr/chart?days={1|7|30|90}` — proxies CoinGecko market_chart with 60s in-memory cache; falls back to a deterministic-realistic synthetic series when CoinGecko returns 429 (preview env is rate-limited).
+- ✅ Frontend: `WalletContext`, `ConnectWalletButton`, `BuyPlanModal` with two-stage UX (payment → **Activation Pending** view), `LiveTicker` (animated payout marquee).
 - ✅ Activation Pending experience: confirmation hero, ETA countdown per chain, tx hash with copy + explorer link, **referral code** derived from buyer wallet, share to **X** and **Telegram** with prefilled text + ref link, Open Dashboard CTA.
+- ✅ **XmrPriceChart** (recharts AreaChart) with 24H/7D/30D/90D toggles, current price + change %, high/low/last-updated, auto-refresh every 60s on 24H view.
+- ✅ **WorkerPool** simulation: 7 workers with addresses, regions (US/EU/Asia/LATAM), live-updating hashrates (every 2s), pool-share progress bars, accepted-shares counter, uptime %, last-share timestamp; ~92% online with occasional flips to offline; total pool hashrate aggregated in header.
 - ✅ Visual polish: ambient gradient mesh, glow rings around Hero stats card, shimmer "MOST POPULAR" badge, hover-lift on Plan cards, gradient icon cards, custom orange scrollbar, custom selection color, fine grid overlay.
 - ✅ Footer legal/company links wired to actual page navigation.
+- ✅ Rebrand: app renamed from XMRMine Pro → **MONERO RIG** across all pages, share text, emails (support@monerorig.com), browser title.
 - ✅ Backend tested: 14/14 pytest cases pass (health, contact success/validation, purchases across chains/tokens, validation, listing, address filter).
 
 ## Prioritized backlog (P0/P1/P2)
