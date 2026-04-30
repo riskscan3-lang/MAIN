@@ -1,34 +1,95 @@
-.App-logo {
-    height: 40vmin;
-    pointer-events: none;
+/* XMRMine Pro – global app polish */
+
+@keyframes float-y {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-12px); }
+}
+@keyframes float-y-slow {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-20px); }
+}
+@keyframes rotate-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes ticker-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(249, 115, 22, 0.25), 0 0 40px rgba(249, 115, 22, 0.1); }
+  50% { box-shadow: 0 0 40px rgba(249, 115, 22, 0.55), 0 0 80px rgba(249, 115, 22, 0.25); }
+}
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes count-bounce {
+  0% { opacity: 0; transform: scale(0.85); }
+  60% { opacity: 1; transform: scale(1.04); }
+  100% { transform: scale(1); }
 }
 
-@media (prefers-reduced-motion: no-preference) {
-    .App-logo {
-        animation: App-logo-spin infinite 20s linear;
-    }
+.animate-float-y { animation: float-y 6s ease-in-out infinite; }
+.animate-float-y-slow { animation: float-y-slow 9s ease-in-out infinite; }
+.animate-rotate-slow { animation: rotate-slow 18s linear infinite; }
+.animate-shimmer {
+  background: linear-gradient(90deg, transparent, rgba(249,115,22,0.35), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 2.5s linear infinite;
+}
+.animate-ticker { animation: ticker-scroll 40s linear infinite; }
+.animate-pulse-glow { animation: pulse-glow 3s ease-in-out infinite; }
+.animate-fade-in-up { animation: fade-in-up 0.7s ease-out both; }
+.animate-count-bounce { animation: count-bounce 0.9s ease-out both; }
+
+.gradient-text-orange {
+  background: linear-gradient(135deg, #fb923c 0%, #fbbf24 45%, #fde047 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
-.App-header {
-    background-color: #0f0f10;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-size: calc(10px + 2vmin);
-    color: white;
+/* Animated gradient border for emphasized cards */
+.glow-border {
+  position: relative;
+  background-clip: padding-box;
+}
+.glow-border::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(249,115,22,0.85), rgba(251,191,36,0.6), rgba(249,115,22,0.0));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
 }
 
-.App-link {
-    color: #61dafb;
+/* Fine grid background overlay */
+.bg-grid-fade {
+  background-image:
+    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse at center, black 40%, transparent 75%);
 }
 
-@keyframes App-logo-spin {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
-    }
+/* Custom scrollbar – orange themed */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #0b1220; }
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #f97316, #b45309);
+  border-radius: 8px;
+  border: 2px solid #0b1220;
 }
+::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, #fb923c, #d97706); }
+
+/* Selection */
+::selection { background: rgba(249, 115, 22, 0.35); color: #fff; }

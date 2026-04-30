@@ -1,0 +1,44 @@
+{
+  "summary": "Backend-only testing for XMRMine Pro (FastAPI + Mongo). Created pytest suite at /app/backend/tests/backend_test.py with 14 tests covering health, /api/contact (success + validation), and /api/purchases (success across chains 1/137/56, USDT/NATIVE, validation on address & tx_hash length, listing, and buyer_address lowercase filter). All 14 tests passed against the public URL (https://task-runner-90.preview.emergentagent.com/api).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/contact, /api/purchases", "issue": "logger is referenced inside handlers (lines 96, 143) but defined AFTER app.include_router() at line 174. Works in practice because handlers are invoked lazily at request time, but this is fragile ordering — move logger setup above the first usage."},
+      {"endpoint": "/api/purchases", "issue": "buyer_address and tx_hash are only length-validated (min/max 42 and 66). No regex check for '0x' prefix or hex characters — any 42/66-char string is accepted. Consider Field(pattern=r'^0x[a-fA-F0-9]{40}$') and r'^0x[a-fA-F0-9]{64}$'."},
+      {"endpoint": "/api/purchases", "issue": "token_type is a plain str — accepts any value (e.g. 'FOO' returns 200). Should be a Literal['USDT','NATIVE'] or validated enum."},
+      {"endpoint": "/api/purchases", "issue": "chain is int with no whitelist — arbitrary integers accepted. Should be Literal[1,56,137] to match supported chains."},
+      {"endpoint": "/api/purchases", "issue": "amount is a free-form str — no numeric validation. A simple Decimal/regex check would prevent bad data."},
+      {"endpoint": "/api/contact, /api/purchases", "issue": "No duplicate-tx_hash protection; same tx_hash can be POSTed multiple times and creates multiple purchase rows. Consider a unique index on tx_hash."},
+      {"endpoint": "global", "issue": "Uses deprecated FastAPI @app.on_event('shutdown') — should migrate to lifespan context manager."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Optional: reorder logger definition to before route handlers in /app/backend/server.py.",
+    "Optional: tighten Pydantic validation on /api/purchases (regex on address/tx_hash, Literal for chain and token_type, numeric amount).",
+    "Optional: add unique index on purchases.tx_hash to prevent duplicates."
+  ],
+  "critical_code_review_comments": [
+    "server.py: logger used before defined in source order (works via lazy request handling, but brittle).",
+    "server.py: PurchaseCreate validation is length-only; malformed hex or wrong chain IDs slip through.",
+    "server.py: token_type accepts arbitrary strings — missing Literal/enum.",
+    "server.py: deprecated on_event shutdown handler should be replaced by lifespan."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (new)"
+  ],
+  "success_rate": {"backend": "100% (14/14)", "frontend": "not tested (per request)"},
+  "test_credentials": "none required",
+  "seed_data_creation": "Tests insert TEST_ prefixed contact_messages and purchases rows (not cleaned up). A small number of records persist in the 'contact_messages' and 'purchases' collections in test_database.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend endpoints /api/, /api/contact (POST+GET), /api/purchases (POST+GET with optional buyer_address filter) all verified via pytest at /app/backend/tests/backend_test.py. Re-run with: REACT_APP_BACKEND_URL=https://task-runner-90.preview.emergentagent.com pytest /app/backend/tests/backend_test.py -v. Frontend was NOT tested per explicit instruction (requires real MetaMask)."
+}
