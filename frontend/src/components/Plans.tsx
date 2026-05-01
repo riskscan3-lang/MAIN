@@ -2,12 +2,14 @@
 import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
 import { Button } from "./ui/button";
-import { Check, Star, Crown, Rocket, Zap, Shield, Clock, Users } from "lucide-react";
+import { Check, Star, Crown, Rocket, Zap, Shield, Clock, Users, Layers } from "lucide-react";
 
 interface Plan {
   id: number;
   name: string;
+  tagline: string;
   icon: React.ReactNode;
+  workers: string;
   hashrate: string;
   price: string;
   priceNum: number;
@@ -22,15 +24,41 @@ interface Plan {
 const plans: Plan[] = [
   {
     id: 1,
-    name: "Starter",
+    name: "Pool Plan",
+    tagline: "Shared mining for beginners",
+    icon: <Layers className="w-6 h-6" />,
+    workers: "1/10 Shared",
+    hashrate: "2.5 KH/s share",
+    price: "$250 USDT",
+    priceNum: 250,
+    dailyEarnings: "$0.85",
+    monthlyROI: "10%",
+    contractDays: 30,
+    features: [
+      "10 users share 1 worker",
+      "Common pool to mine XMR",
+      "Basic mining pool access",
+      "Email support (48h response)",
+      "Daily payouts",
+      "30-day contract",
+      "Real-time dashboard"
+    ],
+    color: "from-slate-500 to-slate-700"
+  },
+  {
+    id: 2,
+    name: "Solo Miner",
+    tagline: "1 dedicated rig",
     icon: <Star className="w-6 h-6" />,
+    workers: "1 Worker",
     hashrate: "25 KH/s",
-    price: "$2,499 USDT",
-    priceNum: 2499,
+    price: "$2,500 USDT",
+    priceNum: 2500,
     dailyEarnings: "$8.32",
     monthlyROI: "10%",
     contractDays: 30,
     features: [
+      "1 worker / 1 dedicated miner",
       "Basic mining pool access",
       "Email support (24h response)",
       "Daily payouts",
@@ -41,16 +69,19 @@ const plans: Plan[] = [
     color: "from-blue-500 to-cyan-500"
   },
   {
-    id: 2,
-    name: "Professional",
+    id: 3,
+    name: "Dual Miner",
+    tagline: "2 dedicated rigs",
     icon: <Crown className="w-6 h-6" />,
+    workers: "2 Workers",
     hashrate: "60 KH/s",
-    price: "$4,999 USDT",
-    priceNum: 4999,
+    price: "$5,000 USDT",
+    priceNum: 5000,
     dailyEarnings: "$19.99",
     monthlyROI: "12%",
     contractDays: 60,
     features: [
+      "2 workers / 2 dedicated miners",
       "Priority pool access",
       "24/7 live chat support",
       "Instant payouts",
@@ -64,16 +95,19 @@ const plans: Plan[] = [
     color: "from-orange-500 to-amber-500"
   },
   {
-    id: 3,
-    name: "Enterprise",
+    id: 4,
+    name: "Multi Rig",
+    tagline: "Up to 5 dedicated miners",
     icon: <Rocket className="w-6 h-6" />,
-    hashrate: "120 KH/s",
-    price: "$8,499 USDT",
-    priceNum: 8499,
-    dailyEarnings: "$39.95",
-    monthlyROI: "14%",
+    workers: "5 Workers",
+    hashrate: "150 KH/s",
+    price: "$10,000 USDT",
+    priceNum: 10000,
+    dailyEarnings: "$50.00",
+    monthlyROI: "15%",
     contractDays: 90,
     features: [
+      "Up to 5 workers / 5 dedicated miners",
       "Dedicated mining pool",
       "Personal account manager",
       "Instant payouts",
@@ -117,7 +151,7 @@ export function Plans({ onSelectPlan }: PlansProps) {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           {plans.map((plan, index) => (
             <div
               key={plan.id}
@@ -156,10 +190,15 @@ export function Plans({ onSelectPlan }: PlansProps) {
                     </span>
                   </div>
                   <CardTitle className="text-2xl font-bold">{plan.name}</CardTitle>
-                  <CardDescription className="text-slate-500 flex items-center justify-center gap-2 mt-1">
+                  <p className="text-xs text-slate-500 mt-1">{plan.tagline}</p>
+                  <CardDescription className="text-slate-500 flex items-center justify-center gap-2 mt-2">
                     <Zap className="w-4 h-4" />
-                    {plan.hashrate} Mining Power
+                    {plan.hashrate}
                   </CardDescription>
+                  <div className="inline-flex items-center gap-1.5 mt-3 mx-auto bg-slate-800/60 border border-slate-700 rounded-full px-3 py-1 text-xs text-slate-300">
+                    <Users className="w-3 h-3 text-orange-400" />
+                    {plan.workers}
+                  </div>
                 </CardHeader>
 
                 <CardContent className="space-y-6 px-6 pb-8">

@@ -2,7 +2,7 @@
 import { Card, CardContent } from "./ui/card";
 import { Shield, Users, Globe, Award, Target, Heart, Lightbulb, Rocket } from "lucide-react";
 
-export function AboutUs() {
+export function AboutUs({ setActiveView }) {
   return (
     <section className="pt-32 pb-24 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">

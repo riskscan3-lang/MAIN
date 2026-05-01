@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Header } from "./components/Header";
 import { Hero } from "./components/Hero";
 import { Plans } from "./components/Plans";
@@ -11,16 +11,25 @@ import { FAQ } from "./components/FAQ";
 import { PrivacyPolicy } from "./components/PrivacyPolicy";
 import { TermsOfService } from "./components/TermsOfService";
 import { Contact } from "./components/Contact";
+import { MyActivity } from "./components/MyActivity";
 import { BuyPlanModal } from "./components/BuyPlanModal";
 import { LiveTicker } from "./components/LiveTicker";
-import { WalletProvider } from "./context/WalletContext";
+import { LiveChat } from "./components/LiveChat";
+import { WalletProvider, useWallet } from "./context/WalletContext";
+import { trackEvent, setTrackingWallet } from "./utils/analytics";
 
-export default function App() {
-  const [activeView, setActiveView] = useState<string>("home");
-  const [selectedPlan, setSelectedPlan] = useState<number | null>(null);
-  const [buyPlanId, setBuyPlanId] = useState<number | null>(null);
+function AppShell() {
+  const [activeView, setActiveView] = useState("home");
+  const [selectedPlan, setSelectedPlan] = useState(null);
+  const [buyPlanId, setBuyPlanId] = useState(null);
+  const wallet = useWallet();
 
-  const handlePlanSelect = (planId: number) => {
+  // Sync wallet → analytics + auto-track page_view on view change
+  useEffect(() => { setTrackingWallet(wallet.address); }, [wallet.address]);
+  useEffect(() => { trackEvent("page_view", activeView); }, [activeView]);
+
+  const handlePlanSelect = (planId) => {
+    trackEvent("plan_buy_click", "plans", { plan_id: planId });
     setSelectedPlan(planId);
     setBuyPlanId(planId);
   };
@@ -44,15 +53,17 @@ export default function App() {
       case "dashboard":
         return <MiningDashboard planId={selectedPlan} />;
       case "about":
-        return <AboutUs />;
+        return <AboutUs setActiveView={setActiveView} />;
       case "faq":
-        return <FAQ />;
+        return <FAQ setActiveView={setActiveView} />;
       case "privacy":
         return <PrivacyPolicy />;
       case "terms":
         return <TermsOfService />;
       case "contact":
         return <Contact />;
+      case "activity":
+        return <MyActivity />;
       default:
         return (
           <>
@@ -66,28 +77,34 @@ export default function App() {
   };
 
   return (
-    <WalletProvider>
-      <div className="dark min-h-screen bg-slate-950 text-white relative overflow-x-hidden" data-testid="app-root">
-        {/* Global ambient background mesh */}
-        <div className="pointer-events-none fixed inset-0 -z-10">
-          <div className="absolute -top-40 -left-40 w-[600px] h-[600px] bg-orange-500/10 rounded-full blur-3xl" />
-          <div className="absolute top-1/2 -right-40 w-[600px] h-[600px] bg-amber-500/10 rounded-full blur-3xl" />
-          <div className="absolute bottom-0 left-1/3 w-[500px] h-[500px] bg-yellow-500/5 rounded-full blur-3xl" />
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(249,115,22,0.15),transparent_60%)]" />
-        </div>
-        <Header activeView={activeView} setActiveView={setActiveView} />
-        <main className="min-h-screen relative" data-testid={`view-${activeView}`}>
-          {renderPage()}
-        </main>
-        <Footer setActiveView={setActiveView} />
-        {buyPlanId !== null && (
-          <BuyPlanModal
-            planId={buyPlanId}
-            onClose={() => setBuyPlanId(null)}
-            onSuccess={goToDashboard}
-          />
-        )}
+    <div className="dark min-h-screen bg-slate-950 text-white relative overflow-x-hidden" data-testid="app-root">
+      <div className="pointer-events-none fixed inset-0 -z-10">
+        <div className="absolute -top-40 -left-40 w-[600px] h-[600px] bg-orange-500/10 rounded-full blur-3xl" />
+        <div className="absolute top-1/2 -right-40 w-[600px] h-[600px] bg-amber-500/10 rounded-full blur-3xl" />
+        <div className="absolute bottom-0 left-1/3 w-[500px] h-[500px] bg-yellow-500/5 rounded-full blur-3xl" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(249,115,22,0.15),transparent_60%)]" />
       </div>
+      <Header activeView={activeView} setActiveView={setActiveView} />
+      <main className="min-h-screen relative" data-testid={`view-${activeView}`}>
+        {renderPage()}
+      </main>
+      <Footer setActiveView={setActiveView} />
+      <LiveChat />
+      {buyPlanId !== null && (
+        <BuyPlanModal
+          planId={buyPlanId}
+          onClose={() => setBuyPlanId(null)}
+          onSuccess={goToDashboard}
+        />
+      )}
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <WalletProvider>
+      <AppShell />
     </WalletProvider>
   );
 }

@@ -18,9 +18,10 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 const PLAN_PRICING = {
-  1: { name: "Starter", usd: 2499, native: 0.001 },
-  2: { name: "Professional", usd: 4999, native: 0.002 },
-  3: { name: "Enterprise", usd: 8499, native: 0.003 },
+  1: { name: "Pool Plan", usd: 250, native: 0.0001 },
+  2: { name: "Solo Miner", usd: 2500, native: 0.001 },
+  3: { name: "Dual Miner", usd: 5000, native: 0.002 },
+  4: { name: "Multi Rig", usd: 10000, native: 0.004 },
 };
 const CHAIN_ETA = { 1: 180, 137: 30, 56: 15 };
 const TOKEN_OPTIONS = ["USDT", "USDC", "NATIVE"];
@@ -42,7 +43,7 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
   const [copied, setCopied] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(0);
 
-  const plan = PLAN_PRICING[planId] || PLAN_PRICING[2];
+  const plan = PLAN_PRICING[planId] || PLAN_PRICING[3];
   const selectedChain = CHAINS[chainId];
   const amountLabel = tokenType === "NATIVE"
     ? `${plan.native} ${selectedChain?.nativeSymbol}`

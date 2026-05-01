@@ -14,27 +14,35 @@ interface MiningDashboardProps {
 const plans = [
   {
     id: 1,
-    name: "Starter",
-    hashrate: "25000",
-    price: "$2,499 USDT",
-    dailyEarnings: 8.32,
+    name: "Pool Plan",
+    hashrate: "2500",
+    price: "$250 USDT",
+    dailyEarnings: 0.85,
     monthlyROI: "10%"
   },
   {
     id: 2,
-    name: "Professional",
+    name: "Solo Miner",
+    hashrate: "25000",
+    price: "$2,500 USDT",
+    dailyEarnings: 8.32,
+    monthlyROI: "10%"
+  },
+  {
+    id: 3,
+    name: "Dual Miner",
     hashrate: "60000",
-    price: "$4,999 USDT",
+    price: "$5,000 USDT",
     dailyEarnings: 19.99,
     monthlyROI: "12%"
   },
   {
-    id: 3,
-    name: "Enterprise",
-    hashrate: "120000",
-    price: "$8,499 USDT",
-    dailyEarnings: 39.95,
-    monthlyROI: "14%"
+    id: 4,
+    name: "Multi Rig",
+    hashrate: "150000",
+    price: "$10,000 USDT",
+    dailyEarnings: 50.00,
+    monthlyROI: "15%"
   }
 ];
 
@@ -46,7 +54,7 @@ export function MiningDashboard({ planId }: MiningDashboardProps) {
   const [isMining, setIsMining] = useState(false);
   const [timeElapsed, setTimeElapsed] = useState(0);
 
-  const selectedPlan = plans.find(p => p.id === planId) || plans[1];
+  const selectedPlan = plans.find(p => p.id === planId) || plans[2];
 
   useEffect(() => {
     if (!isMining) return;

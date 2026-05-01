@@ -3,6 +3,7 @@ import { Button } from "./ui/button";
 import { Pickaxe, Menu, X, ChevronDown } from "lucide-react";
 import { useState } from "react";
 import { ConnectWalletButton } from "./ConnectWalletButton";
+import { useWallet } from "../context/WalletContext";
 
 interface HeaderProps {
   activeView: string;
@@ -13,13 +14,17 @@ export function Header({ activeView, setActiveView }: HeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [resourcesOpen, setResourcesOpen] = useState(false);
 
-  const navItems = [
+  const wallet = useWallet();
+  const baseNavItems = [
     { id: "home", label: "Home" },
     { id: "dashboard", label: "Dashboard" },
     { id: "about", label: "About Us" },
     { id: "faq", label: "FAQ" },
     { id: "contact", label: "Contact" },
   ];
+  const navItems = wallet.isConnected
+    ? [...baseNavItems, { id: "activity", label: "My Activity" }]
+    : baseNavItems;
 
   const resourceItems = [
     { id: "privacy", label: "Privacy Policy" },

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, HTTPException
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -157,6 +157,218 @@ async def list_purchases(buyer_address: Optional[str] = None):
     if buyer_address:
         q['buyer_address'] = buyer_address.lower()
     items = await db.purchases.find(q, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    for it in items:
+        if isinstance(it.get('created_at'), str):
+            it['created_at'] = datetime.fromisoformat(it['created_at'])
+    return items
+
+
+# ---- Wallet sessions (wallet address = user identity) ----
+class WalletSessionCreate(BaseModel):
+    address: str = Field(pattern=r"^0x[a-fA-F0-9]{40}$")
+    source: Literal["injected", "walletconnect", "unknown"] = "unknown"
+    chain_id: Optional[int] = None
+    user_agent: Optional[str] = Field(default=None, max_length=500)
+    referrer: Optional[str] = Field(default=None, max_length=1000)
+
+
+class WalletSession(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    address: str
+    source: str = "unknown"
+    chain_id: Optional[int] = None
+    user_agent: Optional[str] = None
+    referrer: Optional[str] = None
+    connected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@api_router.post("/wallet-sessions", response_model=WalletSession)
+async def record_wallet_session(payload: WalletSessionCreate):
+    data = payload.model_dump()
+    data['address'] = data['address'].lower()
+    obj = WalletSession(**data)
+    doc = obj.model_dump()
+    doc['connected_at'] = doc['connected_at'].isoformat()
+    await db.wallet_sessions.insert_one(doc)
+    return obj
+
+
+class WalletActivityStats(BaseModel):
+    address: str
+    session_count: int = 0
+    purchase_count: int = 0
+    first_seen: Optional[datetime] = None
+    last_seen: Optional[datetime] = None
+    total_spent_usd_like: float = 0.0  # sum of USDT/USDC amounts (NATIVE excluded here)
+
+
+class WalletActivityResponse(BaseModel):
+    address: str
+    stats: WalletActivityStats
+    sessions: List[WalletSession]
+    purchases: List[Purchase]
+
+
+@api_router.get("/wallet/{address}/activity", response_model=WalletActivityResponse)
+async def get_wallet_activity(address: str):
+    addr = address.lower()
+    if not (addr.startswith("0x") and len(addr) == 42):
+        raise HTTPException(status_code=400, detail="Invalid wallet address")
+
+    sessions_raw = await db.wallet_sessions.find({"address": addr}, {"_id": 0}).sort("connected_at", -1).to_list(500)
+    purchases_raw = await db.purchases.find({"buyer_address": addr}, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+    for s in sessions_raw:
+        if isinstance(s.get('connected_at'), str):
+            s['connected_at'] = datetime.fromisoformat(s['connected_at'])
+    for p in purchases_raw:
+        if isinstance(p.get('created_at'), str):
+            p['created_at'] = datetime.fromisoformat(p['created_at'])
+
+    # Stats
+    total_usd = 0.0
+    for p in purchases_raw:
+        if p.get('token_type') in ("USDT", "USDC"):
+            try:
+                total_usd += float(p.get('amount', 0))
+            except (TypeError, ValueError):
+                pass
+
+    connected_at_times = [s['connected_at'] for s in sessions_raw if s.get('connected_at')]
+    first_seen = min(connected_at_times) if connected_at_times else None
+    last_seen = max(connected_at_times) if connected_at_times else None
+
+    stats = WalletActivityStats(
+        address=addr,
+        session_count=len(sessions_raw),
+        purchase_count=len(purchases_raw),
+        first_seen=first_seen,
+        last_seen=last_seen,
+        total_spent_usd_like=round(total_usd, 2),
+    )
+
+    return WalletActivityResponse(
+        address=addr,
+        stats=stats,
+        sessions=[WalletSession(**s) for s in sessions_raw],
+        purchases=[Purchase(**p) for p in purchases_raw],
+    )
+
+
+# ---- Activity events (page views, clicks, custom events tied to wallet) ----
+class ActivityEventCreate(BaseModel):
+    wallet: Optional[str] = None
+    session_id: Optional[str] = Field(default=None, max_length=64)
+    event_type: str = Field(min_length=1, max_length=64)
+    page: Optional[str] = Field(default=None, max_length=64)
+    payload: Optional[dict] = None
+
+
+class ActivityEvent(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    wallet: Optional[str] = None
+    session_id: Optional[str] = None
+    event_type: str
+    page: Optional[str] = None
+    payload: Optional[dict] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@api_router.post("/activity-events", response_model=ActivityEvent)
+async def record_activity_event(payload: ActivityEventCreate):
+    data = payload.model_dump()
+    if data.get("wallet"):
+        data["wallet"] = data["wallet"].lower()
+    obj = ActivityEvent(**data)
+    doc = obj.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    await db.activity_events.insert_one(doc)
+    return obj
+
+
+# ---- Live chat ----
+class ChatMessageCreate(BaseModel):
+    wallet: Optional[str] = None
+    session_id: str = Field(min_length=1, max_length=64)
+    text: str = Field(min_length=1, max_length=2000)
+
+
+class ChatMessage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    wallet: Optional[str] = None
+    session_id: str
+    sender: Literal["user", "bot"] = "user"
+    text: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+def _smart_reply(text: str) -> str:
+    """Lightweight keyword-based auto-reply. In production, swap for a real agent / LLM."""
+    t = text.lower().strip()
+    if any(w in t for w in ["hi", "hello", "hey", "gm", "good morning"]):
+        return "👋 Welcome to MONERO RIG! I'm a quick assistant. Ask me about plans, payouts, wallets, or referrals."
+    if any(w in t for w in ["plan", "price", "cost", "starter", "professional", "enterprise"]):
+        return ("Our plans are: Starter $2,499 · Professional $4,999 · Enterprise $8,499. "
+                "All paid in USDT/USDC on Ethereum, Polygon or BSC. Activate from the Plans section.")
+    if any(w in t for w in ["payout", "withdraw", "withdrawal", "earnings"]):
+        return ("Payouts run every 24h to the wallet address you used to activate the plan. "
+                "Threshold is 0.1 XMR. You can track them on your My Activity page.")
+    if any(w in t for w in ["wallet", "metamask", "connect", "walletconnect", "trust"]):
+        return ("We support MetaMask, Coinbase Wallet, Trust Wallet (browser extension) and 300+ mobile wallets via WalletConnect QR. "
+                "Tap Connect Wallet at the top right to choose.")
+    if any(w in t for w in ["refund", "scam", "rugpull", "fraud", "lost"]):
+        return ("All transactions are on-chain and final. If you sent funds to a wrong address, please share the tx hash here and we'll investigate.")
+    if any(w in t for w in ["referral", "ref", "code", "bonus"]):
+        return ("Every connected wallet gets a personal ref code (visible after a purchase). "
+                "Share it to earn 10% of every friend's first deposit.")
+    if any(w in t for w in ["chain", "network", "polygon", "bsc", "ethereum", "fee", "gas"]):
+        return ("We support Ethereum, Polygon, and BNB Smart Chain. Polygon and BSC have the lowest gas fees — recommended for smaller plans.")
+    if any(w in t for w in ["tx", "hash", "transaction", "pending", "confirm"]):
+        return ("Confirmation ETAs: Ethereum ~3 min, Polygon ~30s, BSC ~15s. "
+                "Once confirmed your plan auto-activates. Your tx is visible on My Activity.")
+    if "?" in text or len(t) > 0:
+        return ("Got it — a real human will follow up shortly. In the meantime, you can browse the FAQ or check your dashboard for live stats.")
+    return "Thanks! We'll get back to you within 24 hours."
+
+
+@api_router.post("/chat/messages")
+async def post_chat_message(payload: ChatMessageCreate):
+    data = payload.model_dump()
+    if data.get("wallet"):
+        data["wallet"] = data["wallet"].lower()
+    user_msg = ChatMessage(**data, sender="user")
+    user_doc = user_msg.model_dump()
+    user_doc['created_at'] = user_doc['created_at'].isoformat()
+    await db.chat_messages.insert_one(user_doc)
+
+    reply_text = _smart_reply(payload.text)
+    bot_msg = ChatMessage(
+        wallet=user_msg.wallet,
+        session_id=user_msg.session_id,
+        sender="bot",
+        text=reply_text,
+    )
+    bot_doc = bot_msg.model_dump()
+    bot_doc['created_at'] = bot_doc['created_at'].isoformat()
+    await db.chat_messages.insert_one(bot_doc)
+
+    return {"user": user_msg, "bot": bot_msg}
+
+
+@api_router.get("/chat/messages", response_model=List[ChatMessage])
+async def list_chat_messages(session_id: Optional[str] = None, wallet: Optional[str] = None):
+    q = {}
+    if session_id:
+        q['session_id'] = session_id
+    if wallet:
+        q['wallet'] = wallet.lower()
+    if not q:
+        return []
+    items = await db.chat_messages.find(q, {"_id": 0}).sort("created_at", 1).to_list(500)
     for it in items:
         if isinstance(it.get('created_at'), str):
             it['created_at'] = datetime.fromisoformat(it['created_at'])

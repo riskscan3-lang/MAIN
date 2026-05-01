@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Card, CardContent } from "./ui/card";
 import { ChevronDown, HelpCircle, MessageCircle } from "lucide-react";
+import { trackEvent } from "../utils/analytics";
 
 const faqCategories = [
   {
@@ -96,7 +97,7 @@ const faqCategories = [
   }
 ];
 
-export function FAQ() {
+export function FAQ({ setActiveView }) {
   const [openItems, setOpenItems] = useState<string[]>([]);
   const [activeCategory, setActiveCategory] = useState("All");
 
@@ -194,10 +195,25 @@ export function FAQ() {
                 Our support team is available 24/7 to help you with any questions
               </p>
               <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-                <button className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-semibold px-8 py-3 rounded-xl transition-all">
+                <button
+                  data-testid="faq-contact-support"
+                  onClick={() => {
+                    trackEvent("faq_contact_support", "faq");
+                    if (typeof setActiveView === "function") setActiveView("contact");
+                  }}
+                  className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-semibold px-8 py-3 rounded-xl transition-all"
+                >
                   Contact Support
                 </button>
-                <button className="bg-slate-800 hover:bg-slate-700 text-white font-semibold px-8 py-3 rounded-xl border border-slate-700 transition-all">
+                <button
+                  data-testid="faq-livechat"
+                  onClick={() => {
+                    trackEvent("faq_livechat_open", "faq");
+                    const bubble = document.querySelector("[data-testid='livechat-bubble']");
+                    if (bubble) bubble.click();
+                  }}
+                  className="bg-slate-800 hover:bg-slate-700 text-white font-semibold px-8 py-3 rounded-xl border border-slate-700 transition-all"
+                >
                   Live Chat
                 </button>
               </div>

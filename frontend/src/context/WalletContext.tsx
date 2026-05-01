@@ -131,23 +131,52 @@ export function WalletProvider({ children }) {
     });
   }, []);
 
+  // Record each new wallet-connect to the backend (fire-and-forget).
+  // Dedupe within this browser tab so we don't POST on every re-render.
+  const recordedRef = useRef(new Set());
+  const recordSession = useCallback(async (addr, source, cid) => {
+    if (!addr) return;
+    const key = `${addr.toLowerCase()}::${source}`;
+    if (recordedRef.current.has(key)) return;
+    recordedRef.current.add(key);
+    try {
+      await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/wallet-sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          address: addr,
+          source,
+          chain_id: cid || null,
+          user_agent: typeof navigator !== "undefined" ? navigator.userAgent.slice(0, 500) : null,
+          referrer: typeof document !== "undefined" ? document.referrer.slice(0, 1000) : null,
+        }),
+      });
+    } catch (e) {
+      console.warn("wallet-sessions record failed", e);
+    }
+  }, []);
+
   const connectInjected = useCallback(async () => {
     if (!injected) throw new Error("No injected wallet found");
     const accounts = await injected.request({ method: "eth_requestAccounts" });
     const cid = await injected.request({ method: "eth_chainId" });
+    const chainIdNum = parseInt(cid, 16);
     setProvider(injected);
     setAddress(accounts[0]);
-    setChainId(parseInt(cid, 16));
-  }, [injected]);
+    setChainId(chainIdNum);
+    recordSession(accounts[0], "injected", chainIdNum);
+  }, [injected, recordSession]);
 
   const connectWalletConnect = useCallback(async () => {
     const wc = await getWCProvider();
     await wc.connect();
     attachProviderListeners(wc);
     setProvider(wc);
-    setAddress(wc.accounts?.[0] || null);
+    const addr = wc.accounts?.[0] || null;
+    setAddress(addr);
     setChainId(wc.chainId || null);
-  }, [attachProviderListeners]);
+    if (addr) recordSession(addr, "walletconnect", wc.chainId || null);
+  }, [attachProviderListeners, recordSession]);
 
   /** Open chooser: if injected exists, prefer it; else WalletConnect */
   const connect = useCallback(async ({ forceWalletConnect = false } = {}) => {

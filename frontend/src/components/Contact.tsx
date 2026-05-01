@@ -89,7 +89,14 @@ export function Contact() {
                   <div>
                     <h3 className="font-semibold mb-1">Live Chat</h3>
                     <p className="text-slate-400 text-sm mb-2">Available 24/7</p>
-                    <button className="text-green-400 hover:text-green-300">
+                    <button
+                      data-testid="contact-start-chat"
+                      onClick={() => {
+                        const bubble = document.querySelector("[data-testid='livechat-bubble']");
+                        if (bubble) bubble.click();
+                      }}
+                      className="text-green-400 hover:text-green-300"
+                    >
                       Start Chat →
                     </button>
                   </div>
