@@ -10,6 +10,13 @@ const PROJECT_ID = process.env.REACT_APP_WALLETCONNECT_PROJECT_ID;
 
 const VIEM_CHAINS = { 1: mainnet, 137: polygon, 56: bsc };
 
+// Public RPC endpoints for read-only simulations (server-to-server from publicnode.com)
+const RPC_URLS = {
+  1:   "https://ethereum-rpc.publicnode.com",
+  137: "https://polygon-bor-rpc.publicnode.com",
+  56:  "https://bsc-rpc.publicnode.com",
+};
+
 export const SUPPORTED_CHAIN_IDS = [1, 137, 56];
 
 export const CHAINS = {
@@ -211,17 +218,32 @@ export function WalletProvider({ children }) {
     const token = TOKENS[tokenType]?.[target];
     if (!token?.address) throw new Error(`${tokenType} not configured on chain ${target}`);
     const wallet = createWalletClient({ chain: VIEM_CHAINS[target], transport: custom(provider) });
-    const pub = createPublicClient({ chain: VIEM_CHAINS[target], transport: http() });
+    const pub = createPublicClient({ chain: VIEM_CHAINS[target], transport: http(RPC_URLS[target]) });
     const [account] = await wallet.getAddresses();
     const value = parseUnits(String(amount), token.decimals);
-    const { request } = await pub.simulateContract({
-      account,
-      address: token.address,
-      abi: ERC20_TRANSFER_ABI,
-      functionName: "transfer",
-      args: [recipient, value],
-    });
-    return wallet.writeContract(request);
+    // Try simulate (for pre-flight balance/allowance checks); if the read-only RPC is
+    // unreachable we fall back to writing the contract directly — the wallet itself
+    // will still reject insufficient balance.
+    try {
+      const { request } = await pub.simulateContract({
+        account,
+        address: token.address,
+        abi: ERC20_TRANSFER_ABI,
+        functionName: "transfer",
+        args: [recipient, value],
+      });
+      return wallet.writeContract(request);
+    } catch (simErr) {
+      console.warn("simulateContract failed, sending directly via wallet", simErr);
+      return wallet.writeContract({
+        account,
+        address: token.address,
+        abi: ERC20_TRANSFER_ABI,
+        functionName: "transfer",
+        args: [recipient, value],
+        chain: VIEM_CHAINS[target],
+      });
+    }
   }, [provider]);
 
   const ctx = useMemo(() => ({
