@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -28,6 +29,17 @@ logger = logging.getLogger(__name__)
 
 # Create the main app without a prefix
 app = FastAPI()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    yield
+    # Shutdown
+    client.close()
+
+
+app.router.lifespan_context = lifespan
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -516,7 +528,3 @@ app.add_middleware(
 
 # Configure logging
 logger = logging.getLogger(__name__)
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
