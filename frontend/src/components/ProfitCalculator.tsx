@@ -6,7 +6,7 @@ import { TrendingUp, Calculator, Calendar, DollarSign, Coins, Zap } from "lucide
 
 const PLAN_OPTIONS = [
   { id: 1, name: "Pool Plan",  price: 250,    daily: 0.85,  hashrate: "2.5 KH/s",   color: "from-slate-500 to-slate-700" },
-  { id: 2, name: "Solo Miner", price: 2500,   daily: 8.32,  hashrate: "25 KH/s",    color: "from-blue-500 to-cyan-500" },
+  { id: 2, name: "Solo Miner", price: 2500,   daily: 25.00, hashrate: "25 KH/s",    color: "from-blue-500 to-cyan-500" },
   { id: 3, name: "Dual Miner", price: 5000,   daily: 19.99, hashrate: "60 KH/s",    color: "from-orange-500 to-amber-500" },
   { id: 4, name: "Multi Rig",  price: 10000,  daily: 50.00, hashrate: "150 KH/s",   color: "from-purple-500 to-pink-500" },
 ];

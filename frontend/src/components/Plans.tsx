@@ -83,8 +83,8 @@ const plans: Plan[] = [
     hashrate: "25 KH/s",
     price: "$2,500 USDT",
     priceNum: 2500,
-    dailyEarnings: "$8.32",
-    monthlyROI: "10%",
+    dailyEarnings: "$25.00",
+    monthlyROI: "30%",
     contractDays: 365,
     contractLabel: "1 year",
     features: [

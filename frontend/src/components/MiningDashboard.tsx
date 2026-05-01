@@ -25,8 +25,8 @@ const plans = [
     name: "Solo Miner",
     hashrate: "25000",
     price: "$2,500 USDT",
-    dailyEarnings: 8.32,
-    monthlyROI: "10%"
+    dailyEarnings: 25.00,
+    monthlyROI: "30%"
   },
   {
     id: 3,
