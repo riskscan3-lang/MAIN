@@ -46,8 +46,8 @@ const plans: Plan[] = [
     hashrate: "2.5 KH/s share",
     price: "$250 USDT",
     priceNum: 250,
-    dailyEarnings: "$0.85",
-    monthlyROI: "10%",
+    dailyEarnings: "$0.70",
+    monthlyROI: "102.40%",
     contractDays: 365,
     contractLabel: "1 year",
     features: [
@@ -83,8 +83,8 @@ const plans: Plan[] = [
     hashrate: "25 KH/s",
     price: "$2,500 USDT",
     priceNum: 2500,
-    dailyEarnings: "$25.00",
-    monthlyROI: "30%",
+    dailyEarnings: "$7.21",
+    monthlyROI: "105.20%",
     contractDays: 365,
     contractLabel: "1 year",
     features: [
@@ -120,8 +120,8 @@ const plans: Plan[] = [
     hashrate: "60 KH/s",
     price: "$5,000 USDT",
     priceNum: 5000,
-    dailyEarnings: "$19.99",
-    monthlyROI: "12%",
+    dailyEarnings: "$18.16",
+    monthlyROI: "132.56%",
     contractDays: 365,
     contractLabel: "1 year",
     features: [
@@ -160,8 +160,8 @@ const plans: Plan[] = [
     hashrate: "150 KH/s",
     price: "$10,000 USDT",
     priceNum: 10000,
-    dailyEarnings: "$50.00",
-    monthlyROI: "15%",
+    dailyEarnings: "$38.19",
+    monthlyROI: "139.40%",
     contractDays: 365,
     contractLabel: "1 year",
     features: [
@@ -287,7 +287,7 @@ export function Plans({ onSelectPlan }: PlansProps) {
                     </div>
                     <div className="text-center border-x border-slate-800">
                       <div className="text-lg font-bold text-green-400">{plan.monthlyROI}</div>
-                      <div className="text-xs text-slate-500">Monthly ROI</div>
+                      <div className="text-xs text-slate-500">Annual ROI</div>
                     </div>
                     <div className="text-center">
                       <div className="text-lg font-bold text-blue-400">{plan.contractLabel}</div>
@@ -388,7 +388,7 @@ function ComparePlansTable({ plans, onSelectPlan }) {
     { label: "Hashrate", get: (p) => <span className="text-orange-400 font-semibold">{p.hashrate}</span> },
     { label: "Price", get: (p) => <span className="text-white font-bold">{p.price}</span> },
     { label: "Daily Earnings", get: (p) => <span className="text-green-400 font-semibold">{p.dailyEarnings}</span> },
-    { label: "Monthly ROI", get: (p) => <span className="text-green-400">{p.monthlyROI}</span> },
+    { label: "Annual ROI", get: (p) => <span className="text-green-400">{p.monthlyROI}</span> },
     { label: "Contract", get: (p) => <span className="text-blue-400">{p.contractLabel}</span> },
     { label: "Pool Access", get: (p) => <span className="text-slate-300">{p.caps.poolAccess}</span> },
     { label: "Support", get: (p) => <span className="text-slate-300">{p.caps.support}</span> },
