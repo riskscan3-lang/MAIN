@@ -90,7 +90,7 @@ export function XmrPriceChart() {
         <div
           ref={containerRef}
           className="tradingview-widget-container w-full"
-          style={{ height: "620px" }}
+          style={{ height: "1000px" }}
           data-testid="xmr-chart-area"
         />
       </CardContent>
