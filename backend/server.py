@@ -28,9 +28,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Create the main app without a prefix
-app = FastAPI()
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -39,7 +36,7 @@ async def lifespan(app: FastAPI):
     client.close()
 
 
-app.router.lifespan_context = lifespan
+app = FastAPI(lifespan=lifespan)
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
