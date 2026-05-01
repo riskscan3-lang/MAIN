@@ -149,7 +149,7 @@ export function MiningDashboard({ planId }: MiningDashboardProps) {
         </div>
 
         {/* Real-time XMR Price Chart */}
-        <div className="mb-6">
+        <div className="mb-6 max-w-[50%]">
           <XmrPriceChart />
         </div>
 
