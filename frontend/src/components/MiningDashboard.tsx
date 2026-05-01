@@ -148,8 +148,8 @@ export function MiningDashboard({ planId }: MiningDashboardProps) {
           </Card>
         </div>
 
-        {/* Real-time XMR Price Chart — breaks out of the max-w-7xl frame on large screens */}
-        <div className="mb-6 lg:-mx-6 xl:-mx-16 2xl:-mx-28">
+        {/* Real-time XMR Price Chart */}
+        <div className="mb-6">
           <XmrPriceChart />
         </div>
 
