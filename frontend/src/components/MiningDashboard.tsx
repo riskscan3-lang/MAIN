@@ -17,7 +17,7 @@ const plans = [
     name: "Pool Plan",
     hashrate: "2500",
     price: "$250 USDT",
-    dailyEarnings: 0.70,
+    dailyEarnings: 1.3863,
     monthlyROI: "102.40%"
   },
   {
@@ -25,7 +25,7 @@ const plans = [
     name: "Solo Miner",
     hashrate: "25000",
     price: "$2,500 USDT",
-    dailyEarnings: 7.21,
+    dailyEarnings: 14.0548,
     monthlyROI: "105.20%"
   },
   {
@@ -33,7 +33,7 @@ const plans = [
     name: "Dual Miner",
     hashrate: "60000",
     price: "$5,000 USDT",
-    dailyEarnings: 18.16,
+    dailyEarnings: 31.8575,
     monthlyROI: "132.56%"
   },
   {
@@ -41,7 +41,7 @@ const plans = [
     name: "Multi Rig",
     hashrate: "150000",
     price: "$10,000 USDT",
-    dailyEarnings: 38.19,
+    dailyEarnings: 65.5890,
     monthlyROI: "139.40%"
   }
 ];
