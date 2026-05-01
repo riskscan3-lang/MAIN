@@ -104,10 +104,10 @@ export function AboutUs({ setActiveView }) {
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {[
-              { name: "Michael Chen", role: "CEO & Founder", exp: "15+ years in blockchain" },
-              { name: "Sarah Williams", role: "CTO", exp: "Ex-Google Engineer" },
-              { name: "David Kumar", role: "Head of Operations", exp: "Mining since 2013" },
-              { name: "Emma Johnson", role: "Head of Security", exp: "Ex-Coinbase Security" }
+              { name: "Phoenix Starc", role: "CEO & Founder", exp: "15+ years in blockchain" },
+              { name: "Lecker Mark", role: "CTO", exp: "Ex-Google Engineer" },
+              { name: "Peter E. Stemple", role: "Head of Operations", exp: "Mining since 2013" },
+              { name: "Sam Sulekh", role: "Head of Security", exp: "Ex-Coinbase Security" }
             ].map((member, idx) => (
               <Card key={idx} className="bg-slate-900 border-slate-800 text-center group hover:border-orange-500/50 transition-all">
                 <CardContent className="pt-6">
