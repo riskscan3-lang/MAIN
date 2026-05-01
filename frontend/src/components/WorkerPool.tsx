@@ -23,18 +23,36 @@ export function WorkerPool() {
       hashrate: w.baseRate,
       shares: 1200 + Math.floor(Math.random() * 800),
       uptime: 98 + Math.random() * 1.99,
-      online: Math.random() > 0.08, // 92% chance online initially
+      online: true, // everyone starts online
+      offlineUntil: 0, // ms timestamp — 0 means no scheduled offline
       lastShare: Math.floor(Math.random() * 12) + 1,
     }))
   );
 
   useEffect(() => {
     const interval = setInterval(() => {
-      setWorkers((prev) =>
-        prev.map((w) => {
-          // 1.5% chance to flip online state
-          const flip = Math.random() < 0.015;
-          const online = flip ? !w.online : w.online;
+      setWorkers((prev) => {
+        const now = Date.now();
+        // Check if any worker is currently scheduled to be offline
+        const anyOffline = prev.some((w) => w.offlineUntil > now);
+
+        // With moderate probability each tick (~6%), if no one is offline,
+        // pick a random worker to go offline for up to 15 seconds
+        let offlineCandidateIdx = -1;
+        if (!anyOffline && Math.random() < 0.06) {
+          offlineCandidateIdx = Math.floor(Math.random() * prev.length);
+        }
+
+        return prev.map((w, idx) => {
+          // If still within offline window, keep offline
+          const isScheduledOffline = w.offlineUntil > now;
+          // Newly scheduled offline: 3-15 seconds duration
+          const newlyOffline = idx === offlineCandidateIdx;
+          const offlineUntil = newlyOffline
+            ? now + (3000 + Math.random() * 12000) // 3–15s
+            : w.offlineUntil;
+          const online = !isScheduledOffline && !newlyOffline;
+
           // Hashrate jitters around base when online, drops to 0 when offline
           const variance = (Math.random() - 0.5) * w.baseRate * 0.06;
           const hashrate = online ? Math.max(0, Math.round(w.baseRate + variance)) : 0;
@@ -49,11 +67,12 @@ export function WorkerPool() {
             hashrate,
             shares: w.shares + shareDelta,
             online,
+            offlineUntil,
             lastShare,
             uptime,
           };
-        })
-      );
+        });
+      });
       setTick((t) => t + 1);
     }, 2000);
     return () => clearInterval(interval);
