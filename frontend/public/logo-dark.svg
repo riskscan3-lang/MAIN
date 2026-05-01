@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 140" width="520" height="140" role="img" aria-label="MONERO RIG — Cloud Mining (dark)">
+  <defs>
+    <linearGradient id="mrIconGradD" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f97316"/>
+      <stop offset="100%" stop-color="#fbbf24"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="520" height="140" rx="16" fill="#0f172a"/>
+  <g transform="translate(20,18)">
+    <rect x="0" y="0" width="104" height="104" rx="22" fill="url(#mrIconGradD)"/>
+    <g stroke="#ffffff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <path d="M24 32 C 42 24, 62 24, 80 32"/>
+      <path d="M52 32 L 32 86"/>
+      <path d="M26 88 L 40 82"/>
+    </g>
+    <circle cx="82" cy="78" r="4" fill="#ffffff" opacity="0.9"/>
+    <circle cx="72" cy="84" r="2" fill="#ffffff" opacity="0.7"/>
+  </g>
+  <g transform="translate(150,0)" font-family="'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif">
+    <text x="0" y="68" font-size="44" font-weight="800" letter-spacing="1.5" fill="#ffffff">MONERO RIG</text>
+    <text x="2" y="96" font-size="14" font-weight="600" letter-spacing="6" fill="#fb923c">CLOUD  MINING</text>
+  </g>
+</svg>
