@@ -38,6 +38,36 @@ let webpackConfig = {
     },
     configure: (webpackConfig) => {
 
+      // Polyfills for web3 libs (buffer/process/etc) under webpack 5
+      webpackConfig.resolve = webpackConfig.resolve || {};
+      webpackConfig.resolve.fallback = {
+        ...(webpackConfig.resolve.fallback || {}),
+        buffer: require.resolve("buffer/"),
+        process: require.resolve("process/browser.js"),
+        util: require.resolve("util/"),
+        stream: require.resolve("stream-browserify"),
+        crypto: require.resolve("crypto-browserify"),
+      };
+      const webpack = require("webpack");
+      webpackConfig.plugins = webpackConfig.plugins || [];
+      webpackConfig.plugins.push(
+        new webpack.ProvidePlugin({
+          Buffer: ["buffer", "Buffer"],
+          process: "process/browser.js",
+        })
+      );
+      // Allow Webpack 5 to resolve ESM imports without fully-specified paths
+      webpackConfig.module = webpackConfig.module || { rules: [] };
+      webpackConfig.module.rules.unshift({
+        test: /\.m?js$/,
+        resolve: { fullySpecified: false },
+      });
+      // viem / wagmi use ESM .mjs in some sub-packages — silence sourcemap warnings
+      webpackConfig.ignoreWarnings = [
+        { module: /node_modules\/(ox|viem|@reown|@walletconnect)/ },
+        /Failed to parse source map/,
+      ];
+
       // Add ignored patterns to reduce watched directories
         webpackConfig.watchOptions = {
           ...webpackConfig.watchOptions,
@@ -82,7 +112,8 @@ webpackConfig.devServer = (devServerConfig) => {
 };
 
 // Wrap with visual edits (automatically adds babel plugin, dev server, and overlay in dev mode)
-if (isDevServer) {
+// NOTE: temporarily disabled — the babel plugin chokes on some @walletconnect / @reown ESM files.
+if (false && isDevServer) {
   try {
     const { withVisualEdits } = require("@emergentbase/visual-edits/craco");
     webpackConfig = withVisualEdits(webpackConfig);

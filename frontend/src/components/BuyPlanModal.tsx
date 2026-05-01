@@ -5,34 +5,30 @@ import {
   Copy, Check, Twitter, Send as SendIcon, Sparkles,
 } from "lucide-react";
 import { Button } from "./ui/button";
-import { useWallet } from "../context/WalletContext";
 import {
-  SUPPORTED_CHAINS,
+  useWallet,
+  CHAINS,
+  SUPPORTED_CHAIN_IDS,
   RECIPIENT_ADDRESS,
-  sendNative,
-  sendUSDT,
-  explorerTxUrl,
   shortAddress,
-} from "../utils/web3";
+  explorerTxUrl,
+} from "../context/WalletContext";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 const PLAN_PRICING = {
-  1: { name: "Starter", usdt: 2499, native: 0.001 },
-  2: { name: "Professional", usdt: 4999, native: 0.002 },
-  3: { name: "Enterprise", usdt: 8499, native: 0.003 },
+  1: { name: "Starter", usd: 2499, native: 0.001 },
+  2: { name: "Professional", usd: 4999, native: 0.002 },
+  3: { name: "Enterprise", usd: 8499, native: 0.003 },
 };
-
-// Approx confirmation ETA seconds per chain
 const CHAIN_ETA = { 1: 180, 137: 30, 56: 15 };
+const TOKEN_OPTIONS = ["USDT", "USDC", "NATIVE"];
 
 const buildReferralCode = (address) => {
   if (!address) return "XMRMINE";
-  const tail = address.replace("0x", "").slice(-6).toUpperCase();
-  return `XMR-${tail}`;
+  return `XMR-${address.replace("0x", "").slice(-6).toUpperCase()}`;
 };
-
 const buildShareText = (planName, refCode) =>
   `Just activated my ${planName} plan on MONERO RIG 🚀⛏️ Earning passive Monero with zero hardware. Use my ref code ${refCode} for a 5% bonus → `;
 
@@ -47,24 +43,22 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
   const [secondsLeft, setSecondsLeft] = useState(0);
 
   const plan = PLAN_PRICING[planId] || PLAN_PRICING[2];
-  const selectedChain = useMemo(() => SUPPORTED_CHAINS.find((c) => c.id === chainId), [chainId]);
-  const amount = tokenType === "USDT" ? plan.usdt : plan.native;
-  const amountLabel = tokenType === "USDT" ? `${plan.usdt} USDT` : `${plan.native} ${selectedChain?.nativeSymbol}`;
+  const selectedChain = CHAINS[chainId];
+  const amountLabel = tokenType === "NATIVE"
+    ? `${plan.native} ${selectedChain?.nativeSymbol}`
+    : `${plan.usd} ${tokenType}`;
   const referralCode = useMemo(() => buildReferralCode(wallet.address), [wallet.address]);
 
   useEffect(() => {
     if (!txHash) return;
     setSecondsLeft(CHAIN_ETA[chainId] || 60);
-    const interval = setInterval(() => {
-      setSecondsLeft((s) => (s > 0 ? s - 1 : 0));
-    }, 1000);
-    return () => clearInterval(interval);
+    const id = setInterval(() => setSecondsLeft((s) => (s > 0 ? s - 1 : 0)), 1000);
+    return () => clearInterval(id);
   }, [txHash, chainId]);
 
   const formatEta = (s) => {
     if (s <= 0) return "Confirming…";
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
+    const m = Math.floor(s / 60), sec = s % 60;
     return m > 0 ? `${m}m ${sec.toString().padStart(2, "0")}s` : `${sec}s`;
   };
 
@@ -76,26 +70,18 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
     } catch (_) {}
   };
 
-  const handleConnect = async () => {
-    setError(null);
-    await wallet.connect();
-  };
-
   const handlePay = async () => {
     setError(null);
     setSubmitting(true);
     try {
       await wallet.ensureChain(chainId);
-
       let hash;
       if (tokenType === "NATIVE") {
-        hash = await sendNative({ chainId, recipient: RECIPIENT_ADDRESS, amountInDecimal: plan.native });
+        hash = await wallet.sendNative({ chainId, recipient: RECIPIENT_ADDRESS, amount: plan.native });
       } else {
-        hash = await sendUSDT({ chainId, recipient: RECIPIENT_ADDRESS, amountInDecimal: plan.usdt });
+        hash = await wallet.sendERC20({ chainId, tokenType, recipient: RECIPIENT_ADDRESS, amount: plan.usd });
       }
-
       setTxHash(hash);
-
       try {
         await fetch(`${API}/purchases`, {
           method: "POST",
@@ -104,21 +90,21 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
             plan_id: String(planId),
             plan_name: plan.name,
             buyer_address: wallet.address,
-            amount: String(amount),
+            amount: tokenType === "NATIVE" ? String(plan.native) : String(plan.usd),
             chain: chainId,
             tx_hash: hash,
             token_type: tokenType,
           }),
         });
-      } catch (e) {
-        console.warn("Backend record failed", e);
-      }
+      } catch (e) { console.warn("Backend record failed", e); }
     } catch (e) {
       setError(e?.shortMessage || e?.message || "Transaction failed");
     } finally {
       setSubmitting(false);
     }
   };
+
+  const supportedChains = SUPPORTED_CHAIN_IDS.map((id) => CHAINS[id]);
 
   return (
     <div
@@ -130,13 +116,8 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
         className="relative w-full max-w-lg bg-gradient-to-br from-slate-900 to-slate-950 border border-orange-500/30 rounded-2xl shadow-2xl shadow-orange-500/10 overflow-hidden max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="relative px-6 py-5 border-b border-slate-800 bg-gradient-to-r from-orange-500/10 via-amber-500/10 to-transparent">
-          <button
-            data-testid="modal-close-button"
-            onClick={onClose}
-            className="absolute right-4 top-4 text-slate-500 hover:text-white"
-          >
+          <button data-testid="modal-close-button" onClick={onClose} className="absolute right-4 top-4 text-slate-500 hover:text-white">
             <X className="w-5 h-5" />
           </button>
           <div className="flex items-center gap-3">
@@ -153,25 +134,30 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
         <div className="p-6 space-y-5">
           {!txHash && (
             <>
-              {/* Wallet connection state */}
+              {/* Wallet connection */}
               {!wallet.isConnected ? (
-                <div>
-                  <p className="text-sm text-slate-400 mb-3">Connect your wallet to continue</p>
-                  <Button
-                    data-testid="modal-connect-wallet"
-                    onClick={handleConnect}
-                    disabled={wallet.connecting}
-                    className="w-full bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 py-6 font-semibold"
-                  >
-                    {wallet.connecting ? (
-                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Connecting…</>
-                    ) : (
-                      <><Wallet className="w-4 h-4 mr-2" /> Connect MetaMask</>
-                    )}
-                  </Button>
-                  {wallet.error && (
-                    <p className="text-xs text-red-400 mt-2">{wallet.error}</p>
-                  )}
+                <div className="space-y-2">
+                  <p className="text-sm text-slate-400 mb-2">Connect your wallet to continue</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <Button
+                      data-testid="modal-connect-injected"
+                      onClick={() => wallet.connect()}
+                      disabled={wallet.connecting}
+                      className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 py-6 font-semibold"
+                    >
+                      {wallet.connecting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Connecting…</> : <><Wallet className="w-4 h-4 mr-2" /> Browser Wallet</>}
+                    </Button>
+                    <Button
+                      data-testid="modal-connect-walletconnect"
+                      onClick={() => wallet.connectWalletConnect()}
+                      disabled={wallet.connecting}
+                      variant="outline"
+                      className="border-slate-700 hover:bg-slate-800 py-6 font-semibold"
+                    >
+                      WalletConnect (QR)
+                    </Button>
+                  </div>
+                  {wallet.error && <p className="text-xs text-red-400">{wallet.error}</p>}
                 </div>
               ) : (
                 <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
@@ -187,7 +173,7 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
               <div>
                 <p className="text-xs uppercase tracking-wider text-slate-500 mb-2">Select network</p>
                 <div className="grid grid-cols-3 gap-2">
-                  {SUPPORTED_CHAINS.map((c) => (
+                  {supportedChains.map((c) => (
                     <button
                       key={c.id}
                       data-testid={`chain-${c.id}`}
@@ -202,9 +188,7 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
                         <span className="font-bold">{c.name}</span>
                         <span className="text-[10px] text-slate-500">{c.nativeSymbol}</span>
                       </div>
-                      {chainId === c.id && (
-                        <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-orange-500 border-2 border-slate-950" />
-                      )}
+                      {chainId === c.id && <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-orange-500 border-2 border-slate-950" />}
                     </button>
                   ))}
                 </div>
@@ -213,46 +197,34 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
               {/* Token */}
               <div>
                 <p className="text-xs uppercase tracking-wider text-slate-500 mb-2">Pay with</p>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    data-testid="token-usdt"
-                    onClick={() => setTokenType("USDT")}
-                    className={`px-3 py-3 rounded-xl border text-sm font-medium transition-all ${
-                      tokenType === "USDT"
-                        ? "border-emerald-500 bg-emerald-500/10 text-white"
-                        : "border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700"
-                    }`}
-                  >
-                    USDT <span className="text-[10px] text-slate-500 block">Stablecoin</span>
-                  </button>
-                  <button
-                    data-testid="token-native"
-                    onClick={() => setTokenType("NATIVE")}
-                    className={`px-3 py-3 rounded-xl border text-sm font-medium transition-all ${
-                      tokenType === "NATIVE"
-                        ? "border-orange-500 bg-orange-500/10 text-white"
-                        : "border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700"
-                    }`}
-                  >
-                    {selectedChain?.nativeSymbol} <span className="text-[10px] text-slate-500 block">Native</span>
-                  </button>
+                <div className="grid grid-cols-3 gap-2">
+                  {TOKEN_OPTIONS.map((t) => (
+                    <button
+                      key={t}
+                      data-testid={`token-${t.toLowerCase()}`}
+                      onClick={() => setTokenType(t)}
+                      className={`px-3 py-3 rounded-xl border text-sm font-medium transition-all ${
+                        tokenType === t
+                          ? (t === "NATIVE"
+                              ? "border-orange-500 bg-orange-500/10 text-white"
+                              : "border-emerald-500 bg-emerald-500/10 text-white")
+                          : "border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700"
+                      }`}
+                    >
+                      {t === "NATIVE" ? selectedChain?.nativeSymbol : t}
+                      <span className="text-[10px] text-slate-500 block">
+                        {t === "USDT" || t === "USDC" ? "Stablecoin" : "Native"}
+                      </span>
+                    </button>
+                  ))}
                 </div>
               </div>
 
               {/* Summary */}
               <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2 text-sm">
-                <div className="flex items-center justify-between text-slate-400">
-                  <span>Plan</span>
-                  <span className="text-white font-medium">{plan.name}</span>
-                </div>
-                <div className="flex items-center justify-between text-slate-400">
-                  <span>Network</span>
-                  <span className="text-white font-medium">{selectedChain?.name}</span>
-                </div>
-                <div className="flex items-center justify-between text-slate-400">
-                  <span>Recipient</span>
-                  <span className="font-mono text-xs text-white">{shortAddress(RECIPIENT_ADDRESS)}</span>
-                </div>
+                <div className="flex items-center justify-between text-slate-400"><span>Plan</span><span className="text-white font-medium">{plan.name}</span></div>
+                <div className="flex items-center justify-between text-slate-400"><span>Network</span><span className="text-white font-medium">{selectedChain?.name}</span></div>
+                <div className="flex items-center justify-between text-slate-400"><span>Recipient</span><span className="font-mono text-xs text-white">{shortAddress(RECIPIENT_ADDRESS)}</span></div>
                 <div className="border-t border-slate-800 pt-2 flex items-center justify-between">
                   <span className="text-slate-400">You pay</span>
                   <span className="text-lg font-bold text-orange-400" data-testid="pay-amount">{amountLabel}</span>
@@ -265,16 +237,11 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
                 disabled={!wallet.isConnected || submitting}
                 className="w-full bg-gradient-to-r from-orange-500 via-amber-500 to-yellow-500 hover:from-orange-600 hover:via-amber-600 hover:to-yellow-600 py-6 font-bold text-base shadow-lg shadow-orange-500/30 disabled:opacity-50"
               >
-                {submitting ? (
-                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Awaiting confirmation…</>
-                ) : (
-                  <>Pay {amountLabel}</>
-                )}
+                {submitting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Awaiting confirmation…</> : <>Pay {amountLabel}</>}
               </Button>
             </>
           )}
 
-          {/* Activation Pending View */}
           {txHash && (
             <div data-testid="activation-view" className="space-y-5 animate-fade-in-up">
               <div className="relative text-center pt-2">
@@ -298,22 +265,11 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
                 <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-1.5">Transaction hash</p>
                 <div className="flex items-center gap-2">
                   <code className="flex-1 text-xs font-mono text-slate-300 truncate" data-testid="tx-hash">{txHash}</code>
-                  <button
-                    data-testid="copy-tx-hash"
-                    onClick={copyHash}
-                    className="p-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300"
-                    title="Copy"
-                  >
+                  <button data-testid="copy-tx-hash" onClick={copyHash} className="p-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300" title="Copy">
                     {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
                   </button>
-                  <a
-                    href={explorerTxUrl(chainId, txHash)}
-                    target="_blank"
-                    rel="noreferrer"
-                    data-testid="tx-explorer-link"
-                    className="p-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-orange-400"
-                    title="View on explorer"
-                  >
+                  <a href={explorerTxUrl(chainId, txHash)} target="_blank" rel="noreferrer" data-testid="tx-explorer-link"
+                    className="p-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-orange-400" title="View on explorer">
                     <ExternalLink className="w-4 h-4" />
                   </a>
                 </div>
@@ -332,8 +288,7 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
                   <a
                     data-testid="share-twitter"
                     href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(buildShareText(plan.name, referralCode))}&url=${encodeURIComponent(typeof window !== "undefined" ? window.location.origin : "")}`}
-                    target="_blank"
-                    rel="noreferrer"
+                    target="_blank" rel="noreferrer"
                     className="flex items-center justify-center gap-2 px-3 py-3 rounded-xl bg-[#0d1426] border border-slate-800 hover:border-sky-500/50 text-slate-200 text-sm font-medium transition-all"
                   >
                     <Twitter className="w-4 h-4 text-sky-400" /> Share on X
@@ -341,8 +296,7 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
                   <a
                     data-testid="share-telegram"
                     href={`https://t.me/share/url?url=${encodeURIComponent(typeof window !== "undefined" ? window.location.origin : "")}&text=${encodeURIComponent(buildShareText(plan.name, referralCode))}`}
-                    target="_blank"
-                    rel="noreferrer"
+                    target="_blank" rel="noreferrer"
                     className="flex items-center justify-center gap-2 px-3 py-3 rounded-xl bg-[#102132] border border-slate-800 hover:border-cyan-500/50 text-slate-200 text-sm font-medium transition-all"
                   >
                     <SendIcon className="w-4 h-4 text-cyan-400" /> Share on Telegram
@@ -353,20 +307,12 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
               <div className="grid grid-cols-2 gap-2">
                 <Button
                   data-testid="modal-go-dashboard"
-                  onClick={() => {
-                    if (typeof onSuccess === "function") onSuccess();
-                    onClose();
-                  }}
+                  onClick={() => { if (typeof onSuccess === "function") onSuccess(); onClose(); }}
                   className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 py-5 font-semibold"
                 >
                   Open Dashboard
                 </Button>
-                <Button
-                  data-testid="modal-done-button"
-                  variant="outline"
-                  onClick={onClose}
-                  className="border-slate-700 text-slate-300 hover:bg-slate-800 py-5 font-semibold"
-                >
+                <Button data-testid="modal-done-button" variant="outline" onClick={onClose} className="border-slate-700 text-slate-300 hover:bg-slate-800 py-5 font-semibold">
                   Done
                 </Button>
               </div>
@@ -382,7 +328,7 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
 
           {!txHash && (
             <p className="text-[11px] text-slate-600 text-center leading-relaxed">
-              Demo flow. Verify recipient address before paying. Past performance does not guarantee future results.
+              Verify recipient address before paying. Past performance does not guarantee future results.
             </p>
           )}
         </div>

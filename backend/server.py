@@ -121,7 +121,7 @@ class PurchaseCreate(BaseModel):
     amount: str = Field(min_length=1, max_length=64)
     chain: Literal[1, 56, 137]
     tx_hash: str = Field(pattern=r"^0x[a-fA-F0-9]{64}$")
-    token_type: Literal["USDT", "NATIVE"]
+    token_type: Literal["USDT", "USDC", "NATIVE"]
 
 
 class Purchase(BaseModel):
