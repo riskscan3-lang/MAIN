@@ -130,8 +130,8 @@ export function MiningDashboard({ planId }: MiningDashboardProps) {
                 <span className="text-slate-500 text-sm">Uptime</span>
                 <Activity className="w-5 h-5 text-blue-400" />
               </div>
-              <div className="text-3xl font-bold text-blue-400">{uptime.toFixed(2)}%</div>
-              <div className="text-sm text-slate-500">{formatTime(timeElapsed)}</div>
+              <div className="text-3xl font-bold text-blue-400 tabular-nums" data-testid="uptime-value">{formatTime(timeElapsed)}</div>
+              <div className="text-sm text-slate-500">This session</div>
             </CardContent>
           </Card>
 
