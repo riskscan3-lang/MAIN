@@ -228,6 +228,67 @@ async def get_xmr_chart(days: int = 1):
     _xmr_cache[days] = {"fetched_at": datetime.now(timezone.utc), "data": fallback}
     return fallback
 
+
+# OHLC (candlestick) data
+_xmr_ohlc_cache: dict = {}
+
+def _generate_fallback_ohlc(days: int):
+    """Generate realistic-looking OHLC candles."""
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    anchor = 162.0
+    if days == 1:
+        n, step_ms = 48, 30 * 60 * 1000       # 30-min candles
+    elif days == 7:
+        n, step_ms = 42, 4 * 60 * 60 * 1000   # 4-hour candles
+    elif days == 30:
+        n, step_ms = 60, 12 * 60 * 60 * 1000  # 12-hour candles
+    else:
+        n, step_ms = 90, 24 * 60 * 60 * 1000  # 1-day candles
+    candles = []
+    o = anchor * (0.95 + _random.random() * 0.1)
+    for i in range(n):
+        ts = now_ms - (n - 1 - i) * step_ms
+        # Close drifts from open with noise
+        drift = (_random.random() - 0.5) * o * 0.025
+        c = o + drift
+        hi = max(o, c) + _random.random() * o * 0.012
+        lo = min(o, c) - _random.random() * o * 0.012
+        candles.append([ts, round(o, 4), round(hi, 4), round(lo, 4), round(c, 4)])
+        o = c  # next open = last close
+    return {"candles": candles, "source": "fallback"}
+
+
+@api_router.get("/xmr/ohlc")
+async def get_xmr_ohlc(days: int = 1):
+    if days not in (1, 7, 30, 90):
+        days = 1
+    cached = _xmr_ohlc_cache.get(days)
+    if cached:
+        age = (datetime.now(timezone.utc) - cached['fetched_at']).total_seconds()
+        if age < _XMR_CACHE_TTL_SECS:
+            return cached['data']
+    # CoinGecko OHLC supports days: 1, 7, 14, 30, 90, 180, 365, max
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            r = await client.get(
+                "https://api.coingecko.com/api/v3/coins/monero/ohlc",
+                params={"vs_currency": "usd", "days": days},
+                headers={"User-Agent": "MoneroRig/1.0"},
+            )
+        if r.status_code == 200:
+            data = {"candles": r.json(), "source": "coingecko"}
+            _xmr_ohlc_cache[days] = {"fetched_at": datetime.now(timezone.utc), "data": data}
+            return data
+        logger.warning("CoinGecko OHLC returned %s", r.status_code)
+    except Exception as e:
+        logger.warning("CoinGecko OHLC fetch failed: %s", e)
+
+    if cached:
+        return cached['data']
+    fallback = _generate_fallback_ohlc(days)
+    _xmr_ohlc_cache[days] = {"fetched_at": datetime.now(timezone.utc), "data": fallback}
+    return fallback
+
 # Include the router in the main app
 app.include_router(api_router)
 

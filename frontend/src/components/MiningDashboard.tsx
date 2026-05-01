@@ -5,6 +5,7 @@ import { Button } from "./ui/button";
 import { Pickaxe, Clock, Wallet, Activity, Cpu, Zap, ArrowRight } from "lucide-react";
 import { XmrPriceChart } from "./XmrPriceChart";
 import { WorkerPool } from "./WorkerPool";
+import { MiningLogs } from "./MiningLogs";
 
 interface MiningDashboardProps {
   planId: number | null;
@@ -161,46 +162,7 @@ export function MiningDashboard({ planId }: MiningDashboardProps) {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="h-64 flex items-center justify-center relative overflow-hidden rounded-lg bg-slate-950 border border-slate-800">
-                {isMining ? (
-                  <div className="relative w-full h-full">
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="relative">
-                        <div className="w-32 h-32 border-4 border-orange-500/30 rounded-full animate-ping"></div>
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <Pickaxe className="w-12 h-12 text-orange-400 animate-bounce" />
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className="absolute inset-0 pointer-events-none">
-                      {[...Array(8)].map((_, i) => (
-                        <div
-                          key={i}
-                          className="absolute h-px bg-gradient-to-r from-transparent via-orange-500/50 to-transparent animate-pulse"
-                          style={{
-                            top: `${(i + 1) * 10}%`,
-                            left: 0,
-                            right: 0,
-                            animationDelay: `${i * 0.2}s`
-                          }}
-                        />
-                      ))}
-                    </div>
-                    
-                    <div className="absolute bottom-4 left-4 right-4 flex justify-between text-xs text-slate-500">
-                      <span>Pool: xmrpool.eu</span>
-                      <span>Worker: worker_01</span>
-                      <span>Diff: {Math.floor(Math.random() * 100000) + 50000}</span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-center">
-                    <Zap className="w-16 h-16 text-slate-700 mx-auto mb-4" />
-                    <p className="text-slate-500">Click "Start Mining" to begin</p>
-                  </div>
-                )}
-              </div>
+              <MiningLogs running={isMining} />
             </CardContent>
           </Card>
 
