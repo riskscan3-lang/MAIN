@@ -2,14 +2,16 @@
 import { Pickaxe } from "lucide-react";
 
 const items = [
-  { user: "0x7a…3f9", plan: "Professional", earned: "$24.18 USDT", time: "12s ago" },
-  { user: "0x9e…b81", plan: "Enterprise",   earned: "$49.55 USDT", time: "31s ago" },
-  { user: "0x21…4cd", plan: "Starter",      earned: "$10.07 USDT", time: "47s ago" },
-  { user: "0x8f…e02", plan: "Professional", earned: "$22.91 USDT", time: "1m ago"  },
-  { user: "0xa3…7d4", plan: "Enterprise",   earned: "$51.04 USDT", time: "1m ago"  },
-  { user: "0x1c…99a", plan: "Starter",      earned: "$ 9.84 USDT", time: "2m ago"  },
-  { user: "0xfa…008", plan: "Professional", earned: "$25.60 USDT", time: "2m ago"  },
-  { user: "0x5d…111", plan: "Enterprise",   earned: "$48.77 USDT", time: "3m ago"  },
+  { user: "0x7a…3f9", plan: "Dual Miner",  earned: "$18.16 USDT", time: "12s ago" },
+  { user: "0x9e…b81", plan: "Multi Rig",   earned: "$38.19 USDT", time: "31s ago" },
+  { user: "0x21…4cd", plan: "Pool Plan",   earned: "$0.70 USDT",  time: "47s ago" },
+  { user: "0x8f…e02", plan: "Solo Miner",  earned: "$7.21 USDT",  time: "1m ago"  },
+  { user: "0xa3…7d4", plan: "Multi Rig",   earned: "$38.19 USDT", time: "1m ago"  },
+  { user: "0x1c…99a", plan: "Solo Miner",  earned: "$7.21 USDT",  time: "2m ago"  },
+  { user: "0xfa…008", plan: "Dual Miner",  earned: "$18.16 USDT", time: "2m ago"  },
+  { user: "0x5d…111", plan: "Multi Rig",   earned: "$38.19 USDT", time: "3m ago"  },
+  { user: "0xb2…7a3", plan: "Pool Plan",   earned: "$0.70 USDT",  time: "4m ago"  },
+  { user: "0x3c…c41", plan: "Dual Miner",  earned: "$18.16 USDT", time: "5m ago"  },
 ];
 
 export function LiveTicker() {

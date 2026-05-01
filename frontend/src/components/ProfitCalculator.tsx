@@ -22,50 +22,42 @@ export function ProfitCalculator({ onSelectPlan }: ProfitCalculatorProps) {
   const [months, setMonths] = useState(0);
 
   const plan = PLAN_OPTIONS.find((p) => p.id === planId) || PLAN_OPTIONS[2];
-  // Derive daily earnings from annual ROI so 12 months exactly matches the stated ROI
-  const dailyExact = (plan.price * plan.annualROIPct) / 100 / 365;
+  // Full-year target: what the user receives back over 365 days = investment + ROI profit
+  const fullYearProfit = (plan.price * plan.annualROIPct) / 100;
+  const fullYearTotal = plan.price + fullYearProfit;
+  // Daily payout: evenly spread across 365 days so 0m = $0 and 12m = investment + ROI
+  const dailyPayout = fullYearTotal / 365;
 
   const data = useMemo(() => {
-    const days = Math.round(months * (365 / 12)); // exact 365 at 12 months, 0 at 0
-    const profit = dailyExact * days;
-    const totalEarned = plan.price + profit;
+    const days = Math.round(months * (365 / 12)); // 0 at month 0, 365 at month 12
+    const totalEarned = dailyPayout * days; // linear accrual starting at 0
+    const profit = (fullYearProfit / 365) * days; // ROI portion only
     const roi = (profit / plan.price) * 100;
-    const breakEvenDays = dailyExact > 0 ? Math.ceil(plan.price / dailyExact) : 0;
+    const breakEvenDays = dailyPayout > 0 ? Math.ceil(plan.price / dailyPayout) : 0;
     const breakEvenLabel =
       breakEvenDays > 30
         ? `${(breakEvenDays / 30).toFixed(1)} months`
         : `${breakEvenDays} days`;
-    // Build sparkline points (cumulative profit over months) — always cover full year for shape
-    const fullYearDays = 365;
+    // Sparkline: cumulative total earned (0 → fullYearTotal) across the full year
     const points = [];
-    const stepDays = fullYearDays / 24;
     for (let i = 0; i <= 24; i++) {
-      const d = stepDays * i;
-      points.push({ d, profit: dailyExact * d - plan.price });
+      const frac = i / 24;
+      points.push({ frac, value: fullYearTotal * frac });
     }
-    const minP = Math.min(...points.map((p) => p.profit));
-    const maxP = Math.max(...points.map((p) => p.profit));
+    const minP = 0;
+    const maxP = fullYearTotal || 1;
     const range = maxP - minP || 1;
     const path = points
       .map((pt, idx) => {
         const x = (idx / (points.length - 1)) * 100;
-        const y = 100 - ((pt.profit - minP) / range) * 100;
+        const y = 100 - ((pt.value - minP) / range) * 100;
         return `${idx === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`;
       })
       .join(" ");
-    // Find where profit crosses zero (break-even) as a % along x-axis
-    let breakEvenX = null;
-    for (let i = 1; i < points.length; i++) {
-      if (points[i - 1].profit < 0 && points[i].profit >= 0) {
-        const t = -points[i - 1].profit / (points[i].profit - points[i - 1].profit);
-        breakEvenX = ((i - 1 + t) / (points.length - 1)) * 100;
-        break;
-      }
-    }
-    // Current-month progress marker on the curve
+    // Current-month progress marker on the curve (0–100%)
     const progressX = (months / 12) * 100;
-    return { totalEarned, profit, roi, breakEvenDays, breakEvenLabel, path, breakEvenX, minP, maxP, progressX };
-  }, [plan, dailyExact, months]);
+    return { totalEarned, profit, roi, breakEvenDays, breakEvenLabel, path, minP, maxP, progressX };
+  }, [plan, dailyPayout, fullYearProfit, fullYearTotal, months]);
 
   return (
     <section
@@ -185,9 +177,9 @@ export function ProfitCalculator({ onSelectPlan }: ProfitCalculatorProps) {
                     </div>
                   </div>
                   <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
-                    <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Daily Earnings</div>
+                    <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Daily Payout</div>
                     <div className="text-lg font-bold text-orange-400" data-testid="calc-daily">
-                      {fmtUSD(dailyExact)}
+                      {fmtUSD(dailyPayout)}
                     </div>
                   </div>
                 </div>
@@ -236,7 +228,7 @@ export function ProfitCalculator({ onSelectPlan }: ProfitCalculatorProps) {
                       Cumulative Profit Curve
                     </div>
                     <div className="text-[10px] text-slate-500">
-                      Break-even: <span className="text-blue-400 font-semibold">{data.breakEvenLabel}</span>
+                      Full payout: <span className="text-blue-400 font-semibold">12 months</span>
                     </div>
                   </div>
                   <div className="relative h-32 w-full" data-testid="calc-sparkline">
@@ -251,26 +243,10 @@ export function ProfitCalculator({ onSelectPlan }: ProfitCalculatorProps) {
                           <stop offset="100%" stopColor="rgb(34 197 94)" />
                         </linearGradient>
                       </defs>
-                      {/* Zero line */}
-                      {data.minP < 0 && data.maxP > 0 && (
-                        <line
-                          x1="0"
-                          y1={(data.maxP / (data.maxP - data.minP)) * 100}
-                          x2="100"
-                          y2={(data.maxP / (data.maxP - data.minP)) * 100}
-                          stroke="rgb(71 85 105)"
-                          strokeDasharray="2 2"
-                          strokeWidth="0.4"
-                        />
-                      )}
                       {/* Fill */}
                       <path d={`${data.path} L100,100 L0,100 Z`} fill="url(#curveFill)" />
                       {/* Curve */}
                       <path d={data.path} stroke="url(#curveStroke)" strokeWidth="1" fill="none" strokeLinecap="round" />
-                      {/* Break-even marker */}
-                      {data.breakEvenX !== null && (
-                        <circle cx={data.breakEvenX} cy={(data.maxP / (data.maxP - data.minP)) * 100} r="1.5" fill="rgb(96 165 250)" />
-                      )}
                       {/* Current month marker */}
                       <line
                         x1={data.progressX}
