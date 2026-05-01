@@ -51,7 +51,7 @@ export function XmrPriceChart() {
           src={TV_SRC}
           data-testid="xmr-chart-area"
           className="w-full block"
-          style={{ height: "1000px", border: 0 }}
+          style={{ height: "500px", border: 0 }}
           loading="lazy"
           allow="fullscreen"
         />
