@@ -37,16 +37,26 @@ User uploaded a `src/`-only React + TypeScript + Tailwind + shadcn project (XMRM
 - ✅ Rebrand: app renamed from XMRMine Pro → **MONERO RIG** across all pages, share text, emails (support@monerorig.com), browser title.
 - ✅ Backend tested: 14/14 pytest cases pass (health, contact success/validation, purchases across chains/tokens, validation, listing, address filter).
 
+## What's been implemented (2026-05-01)
+- ✅ **4-tier pricing model**: Pool Plan ($250 / 1 worker shared 10 users / 30d / 10% ROI), Solo Miner ($2,500 / 1 worker / 30d / 10% ROI), Dual Miner ($5,000 / 2 workers / 60d / 12% ROI — Most Popular), Multi Rig ($10,000 / 5 workers / 90d / 15% ROI).
+- ✅ **Annual billing toggle** (Standard / Annual): Annual = 10× upfront price, 365-day contract, +25% bonus daily earnings & ROI; "save ~17%" badge displayed; bonus row shown in feature list.
+- ✅ **Compare Plans table**: Collapsible side-by-side comparison with 17 rows (Workers, Hashrate, Price, Daily, ROI, Contract, Pool Access, Support, Payouts + 8 binary capabilities — Dashboard, Mobile App, Referral, Priority Withdrawals, Account Manager, API Access, Custom Reporting, VIP Bonus). Each column has a "Choose" CTA.
+- ✅ Backend `purchases` model accepts `billing_mode: Literal["standard","annual"]` and persists it (verified via curl).
+- ✅ `BuyPlanModal` receives `billingMode` prop and multiplies price 10× for annual.
+
 ## Prioritized backlog (P0/P1/P2)
 - **P1**: Replace placeholder receiving address (`0x000...dEaD`) in `/app/frontend/.env` (`REACT_APP_RECIPIENT_ADDRESS`) with real business wallet.
+- **P1**: Transaction-confirmation polling: flip `status` `pending → confirmed/failed` via Etherscan/PolygonScan/BscScan.
 - **P1**: Migrate from deprecated `@app.on_event("shutdown")` to FastAPI lifespan.
 - **P2**: Add unique index on `purchases.tx_hash` to prevent duplicate inserts.
-- **P2**: Cron / background worker to verify on-chain confirmation status (poll Etherscan/PolygonScan/BscScan API), flip `status` from `pending` → `confirmed` / `failed`.
-- **P2**: Auth (Emergent Google or email link) so users can view their own purchase history page.
-- **P2**: Real referrer/affiliate codes in Plans page (currently static "Personal referral link" feature).
+- **P2**: Pipe terminal mining logs into "Recent Activity" UI cards (SHARE/BLOCK/PAYOUT summaries).
+- **P2**: SIWE (Sign-In With Ethereum) for cryptographic wallet auth.
+- **P2**: Real referrer/affiliate codes (currently derived statically from wallet address).
 - **P2**: Replace simulated MiningDashboard with real-data feed (pool API).
-- **P3**: WalletConnect / Coinbase Wallet support (requires Reown projectId).
-- **P3**: i18n (multi-language) for global audience.
+- **P3**: WalletConnect / Coinbase Wallet support fully wired (currently scaffolded via `@walletconnect/ethereum-provider`).
+- **P3**: Refactor: remove dead `/api/xmr/chart` & `/api/xmr/ohlc` endpoints superseded by TradingView widget; clean up shadcn `// @ts-nocheck` shims.
+- **P3**: i18n (multi-language).
 
 ## Next tasks
-- Confirm with user: set the real receiving wallet in `.env`, decide which chains stay enabled, and whether to enable WalletConnect for non-MetaMask wallets.
+- Confirm real receiving wallet in `.env`.
+- User to verify Plans / Annual toggle / Compare table on their preview URL and approve.

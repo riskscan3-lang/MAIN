@@ -122,6 +122,7 @@ class PurchaseCreate(BaseModel):
     chain: Literal[1, 56, 137]
     tx_hash: str = Field(pattern=r"^0x[a-fA-F0-9]{64}$")
     token_type: Literal["USDT", "USDC", "NATIVE"]
+    billing_mode: Literal["standard", "annual"] = "standard"
 
 
 class Purchase(BaseModel):
@@ -135,6 +136,7 @@ class Purchase(BaseModel):
     chain: int
     tx_hash: str
     token_type: str
+    billing_mode: str = "standard"
     status: str = "pending"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

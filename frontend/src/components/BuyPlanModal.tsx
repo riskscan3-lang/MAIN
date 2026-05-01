@@ -33,7 +33,7 @@ const buildReferralCode = (address) => {
 const buildShareText = (planName, refCode) =>
   `Just activated my ${planName} plan on MONERO RIG 🚀⛏️ Earning passive Monero with zero hardware. Use my ref code ${refCode} for a 5% bonus → `;
 
-export function BuyPlanModal({ planId, onClose, onSuccess }) {
+export function BuyPlanModal({ planId, billingMode = "standard", onClose, onSuccess }) {
   const wallet = useWallet();
   const [chainId, setChainId] = useState(1);
   const [tokenType, setTokenType] = useState("USDT");
@@ -43,7 +43,14 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
   const [copied, setCopied] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(0);
 
-  const plan = PLAN_PRICING[planId] || PLAN_PRICING[3];
+  const basePlan = PLAN_PRICING[planId] || PLAN_PRICING[3];
+  const isAnnual = billingMode === "annual";
+  const ANNUAL_MULTIPLIER = 10;
+  const plan = {
+    ...basePlan,
+    usd: isAnnual ? basePlan.usd * ANNUAL_MULTIPLIER : basePlan.usd,
+    native: isAnnual ? basePlan.native * ANNUAL_MULTIPLIER : basePlan.native,
+  };
   const selectedChain = CHAINS[chainId];
   const amountLabel = tokenType === "NATIVE"
     ? `${plan.native} ${selectedChain?.nativeSymbol}`
@@ -95,6 +102,7 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
             chain: chainId,
             tx_hash: hash,
             token_type: tokenType,
+            billing_mode: billingMode,
           }),
         });
       } catch (e) { console.warn("Backend record failed", e); }
