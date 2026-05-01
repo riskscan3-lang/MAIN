@@ -1,0 +1,289 @@
+// @ts-nocheck
+import { useState, useMemo } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { Button } from "./ui/button";
+import { TrendingUp, Calculator, Calendar, DollarSign, Coins, Zap } from "lucide-react";
+
+const PLAN_OPTIONS = [
+  { id: 1, name: "Pool Plan",  price: 250,    daily: 0.85,  hashrate: "2.5 KH/s",   color: "from-slate-500 to-slate-700" },
+  { id: 2, name: "Solo Miner", price: 2500,   daily: 8.32,  hashrate: "25 KH/s",    color: "from-blue-500 to-cyan-500" },
+  { id: 3, name: "Dual Miner", price: 5000,   daily: 19.99, hashrate: "60 KH/s",    color: "from-orange-500 to-amber-500" },
+  { id: 4, name: "Multi Rig",  price: 10000,  daily: 50.00, hashrate: "150 KH/s",   color: "from-purple-500 to-pink-500" },
+];
+
+const fmtUSD = (n) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+interface ProfitCalculatorProps {
+  onSelectPlan?: (planId: number) => void;
+}
+
+export function ProfitCalculator({ onSelectPlan }: ProfitCalculatorProps) {
+  const [planId, setPlanId] = useState(3); // default to Most Popular
+  const [months, setMonths] = useState(12);
+
+  const plan = PLAN_OPTIONS.find((p) => p.id === planId) || PLAN_OPTIONS[2];
+
+  const data = useMemo(() => {
+    const days = months * 30;
+    const totalEarnings = plan.daily * days;
+    const netProfit = totalEarnings - plan.price;
+    const roi = (netProfit / plan.price) * 100;
+    const breakEvenDays = Math.ceil(plan.price / plan.daily);
+    const breakEvenLabel =
+      breakEvenDays > 30
+        ? `${(breakEvenDays / 30).toFixed(1)} months`
+        : `${breakEvenDays} days`;
+    // Build sparkline points (cumulative profit over months)
+    const points = [];
+    const stepDays = days / 24;
+    for (let i = 0; i <= 24; i++) {
+      const d = stepDays * i;
+      points.push({ d, profit: plan.daily * d - plan.price });
+    }
+    const minP = Math.min(...points.map((p) => p.profit));
+    const maxP = Math.max(...points.map((p) => p.profit));
+    const range = maxP - minP || 1;
+    const path = points
+      .map((pt, idx) => {
+        const x = (idx / (points.length - 1)) * 100;
+        const y = 100 - ((pt.profit - minP) / range) * 100;
+        return `${idx === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`;
+      })
+      .join(" ");
+    // Find where profit crosses zero (break-even) as a % along x-axis
+    let breakEvenX = null;
+    for (let i = 1; i < points.length; i++) {
+      if (points[i - 1].profit < 0 && points[i].profit >= 0) {
+        const t = -points[i - 1].profit / (points[i].profit - points[i - 1].profit);
+        breakEvenX = ((i - 1 + t) / (points.length - 1)) * 100;
+        break;
+      }
+    }
+    return { totalEarnings, netProfit, roi, breakEvenDays, breakEvenLabel, path, breakEvenX, minP, maxP };
+  }, [plan, months]);
+
+  return (
+    <section
+      id="calculator"
+      className="py-24 px-4 sm:px-6 lg:px-8 bg-slate-950 relative overflow-hidden"
+      data-testid="profit-calculator"
+    >
+      {/* Ambient background */}
+      <div className="absolute -top-40 right-0 w-[500px] h-[500px] bg-orange-500/10 rounded-full blur-3xl" />
+      <div className="absolute -bottom-40 left-0 w-[500px] h-[500px] bg-amber-500/5 rounded-full blur-3xl" />
+
+      <div className="max-w-7xl mx-auto relative">
+        <div className="text-center mb-12">
+          <div className="inline-flex items-center gap-2 bg-orange-500/10 border border-orange-500/30 rounded-full px-4 py-2 mb-6">
+            <Calculator className="w-4 h-4 text-orange-400" />
+            <span className="text-sm text-orange-300">Profit Projection</span>
+          </div>
+          <h2 className="text-4xl sm:text-5xl font-bold mb-4">
+            Calculate Your{" "}
+            <span className="bg-gradient-to-r from-orange-400 to-amber-400 bg-clip-text text-transparent">
+              Mining Returns
+            </span>
+          </h2>
+          <p className="text-slate-400 max-w-2xl mx-auto text-lg">
+            Pick a plan and a timeframe — see exactly how much XMR-equivalent revenue you can expect over the life of your 1-year contract.
+          </p>
+        </div>
+
+        <Card className="bg-slate-900/70 backdrop-blur-sm border-slate-800 overflow-hidden shadow-2xl shadow-black/50">
+          <CardHeader className="border-b border-slate-800 bg-slate-950/40">
+            <CardTitle className="flex items-center gap-3 text-white">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center shadow-lg shadow-orange-500/30">
+                <TrendingUp className="w-5 h-5 text-white" />
+              </div>
+              Profit Calculator
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-6 sm:p-8">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+              {/* LEFT: Inputs */}
+              <div className="space-y-8">
+                {/* Plan picker */}
+                <div>
+                  <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold flex items-center gap-2 mb-3">
+                    <Zap className="w-3.5 h-3.5 text-orange-400" />
+                    Select Plan
+                  </label>
+                  <div className="grid grid-cols-2 gap-3" data-testid="calc-plan-picker">
+                    {PLAN_OPTIONS.map((p) => {
+                      const active = p.id === planId;
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => setPlanId(p.id)}
+                          data-testid={`calc-plan-${p.id}`}
+                          className={`text-left rounded-xl border-2 p-4 transition-all ${
+                            active
+                              ? "border-orange-500 bg-orange-500/10 shadow-lg shadow-orange-500/20"
+                              : "border-slate-800 bg-slate-900/60 hover:border-slate-700 hover:bg-slate-900"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <span className={`inline-block w-7 h-7 rounded-lg bg-gradient-to-br ${p.color}`} />
+                            {active && (
+                              <span className="text-[10px] font-bold tracking-wider text-orange-400">SELECTED</span>
+                            )}
+                          </div>
+                          <div className="text-sm font-semibold text-white">{p.name}</div>
+                          <div className="text-xs text-slate-500 mt-1">{p.hashrate}</div>
+                          <div className="text-xs text-orange-400 mt-2 font-medium">${p.price.toLocaleString()}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Months slider */}
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold flex items-center gap-2">
+                      <Calendar className="w-3.5 h-3.5 text-orange-400" />
+                      Timeframe
+                    </label>
+                    <span className="text-sm font-bold text-orange-400" data-testid="calc-months-label">
+                      {months} {months === 1 ? "month" : "months"}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={12}
+                    step={1}
+                    value={months}
+                    onChange={(e) => setMonths(parseInt(e.target.value))}
+                    data-testid="calc-months-slider"
+                    className="profit-slider w-full appearance-none bg-slate-800 rounded-full h-2 outline-none cursor-pointer"
+                    style={{
+                      background: `linear-gradient(to right, rgb(249 115 22) 0%, rgb(251 191 36) ${((months - 1) / 11) * 100}%, rgb(30 41 59) ${((months - 1) / 11) * 100}%, rgb(30 41 59) 100%)`,
+                    }}
+                  />
+                  <div className="flex justify-between mt-2 text-[10px] text-slate-600">
+                    <span>1m</span>
+                    <span>3m</span>
+                    <span>6m</span>
+                    <span>9m</span>
+                    <span>12m</span>
+                  </div>
+                </div>
+
+                {/* Quick stats grid */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+                    <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Investment</div>
+                    <div className="text-lg font-bold text-white" data-testid="calc-investment">
+                      ${plan.price.toLocaleString()}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+                    <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Daily Earnings</div>
+                    <div className="text-lg font-bold text-orange-400" data-testid="calc-daily">
+                      {fmtUSD(plan.daily)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* RIGHT: Results */}
+              <div className="space-y-6">
+                {/* Headline projection */}
+                <div className="rounded-2xl border-2 border-orange-500/40 bg-gradient-to-br from-orange-500/10 via-amber-500/5 to-transparent p-6 relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-orange-500/20 rounded-full blur-3xl" />
+                  <div className="relative">
+                    <div className="text-xs uppercase tracking-wider text-orange-400/80 font-semibold mb-2 flex items-center gap-2">
+                      <DollarSign className="w-3.5 h-3.5" />
+                      Projected Earnings · {months}m
+                    </div>
+                    <div className="text-4xl sm:text-5xl font-bold text-white mb-2" data-testid="calc-total-earnings">
+                      {fmtUSD(data.totalEarnings)}
+                    </div>
+                    <div className="flex items-center gap-3 text-sm">
+                      <span className="text-slate-400">Net profit:</span>
+                      <span
+                        className={`font-bold ${data.netProfit >= 0 ? "text-green-400" : "text-red-400"}`}
+                        data-testid="calc-net-profit"
+                      >
+                        {data.netProfit >= 0 ? "+" : ""}
+                        {fmtUSD(data.netProfit)}
+                      </span>
+                      <span
+                        className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                          data.roi >= 0 ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
+                        }`}
+                        data-testid="calc-roi"
+                      >
+                        {data.roi >= 0 ? "+" : ""}
+                        {data.roi.toFixed(1)}% ROI
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sparkline */}
+                <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold flex items-center gap-2">
+                      <TrendingUp className="w-3.5 h-3.5 text-green-400" />
+                      Cumulative Profit Curve
+                    </div>
+                    <div className="text-[10px] text-slate-500">
+                      Break-even: <span className="text-blue-400 font-semibold">{data.breakEvenLabel}</span>
+                    </div>
+                  </div>
+                  <div className="relative h-32 w-full" data-testid="calc-sparkline">
+                    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full">
+                      <defs>
+                        <linearGradient id="curveFill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="rgb(34 197 94)" stopOpacity="0.4" />
+                          <stop offset="100%" stopColor="rgb(34 197 94)" stopOpacity="0" />
+                        </linearGradient>
+                        <linearGradient id="curveStroke" x1="0" y1="0" x2="1" y2="0">
+                          <stop offset="0%" stopColor="rgb(249 115 22)" />
+                          <stop offset="100%" stopColor="rgb(34 197 94)" />
+                        </linearGradient>
+                      </defs>
+                      {/* Zero line */}
+                      {data.minP < 0 && data.maxP > 0 && (
+                        <line
+                          x1="0"
+                          y1={(data.maxP / (data.maxP - data.minP)) * 100}
+                          x2="100"
+                          y2={(data.maxP / (data.maxP - data.minP)) * 100}
+                          stroke="rgb(71 85 105)"
+                          strokeDasharray="2 2"
+                          strokeWidth="0.4"
+                        />
+                      )}
+                      {/* Fill */}
+                      <path d={`${data.path} L100,100 L0,100 Z`} fill="url(#curveFill)" />
+                      {/* Curve */}
+                      <path d={data.path} stroke="url(#curveStroke)" strokeWidth="1" fill="none" strokeLinecap="round" />
+                      {/* Break-even marker */}
+                      {data.breakEvenX !== null && (
+                        <circle cx={data.breakEvenX} cy={(data.maxP / (data.maxP - data.minP)) * 100} r="1.5" fill="rgb(96 165 250)" />
+                      )}
+                    </svg>
+                  </div>
+                </div>
+
+                {/* CTA */}
+                <Button
+                  onClick={() => onSelectPlan && onSelectPlan(plan.id)}
+                  data-testid="calc-buy-cta"
+                  className="w-full py-6 text-base font-semibold bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 shadow-lg shadow-orange-500/25 hover:shadow-orange-500/40"
+                >
+                  <Coins className="w-4 h-4 mr-2" />
+                  Get Started with {plan.name}
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </section>
+  );
+}

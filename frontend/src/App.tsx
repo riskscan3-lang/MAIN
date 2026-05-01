@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { Header } from "./components/Header";
 import { Hero } from "./components/Hero";
 import { Plans } from "./components/Plans";
+import { ProfitCalculator } from "./components/ProfitCalculator";
 import { MiningDashboard } from "./components/MiningDashboard";
 import { Stats } from "./components/Stats";
 import { Footer } from "./components/Footer";
@@ -47,6 +48,7 @@ function AppShell() {
             <Hero setActiveView={setActiveView} />
             <LiveTicker />
             <Plans onSelectPlan={handlePlanSelect} />
+            <ProfitCalculator onSelectPlan={handlePlanSelect} />
             <Stats />
           </>
         );
@@ -70,6 +72,7 @@ function AppShell() {
             <Hero setActiveView={setActiveView} />
             <LiveTicker />
             <Plans onSelectPlan={handlePlanSelect} />
+            <ProfitCalculator onSelectPlan={handlePlanSelect} />
             <Stats />
           </>
         );

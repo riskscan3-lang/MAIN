@@ -93,3 +93,27 @@
 
 /* Selection */
 ::selection { background: rgba(249, 115, 22, 0.35); color: #fff; }
+
+/* Profit calculator slider thumb */
+.profit-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, #f97316, #fbbf24);
+  border: 3px solid #0f172a;
+  box-shadow: 0 0 0 2px rgba(249,115,22,0.5), 0 4px 12px rgba(249,115,22,0.45);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+.profit-slider::-webkit-slider-thumb:hover { transform: scale(1.1); }
+.profit-slider::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, #f97316, #fbbf24);
+  border: 3px solid #0f172a;
+  box-shadow: 0 0 0 2px rgba(249,115,22,0.5), 0 4px 12px rgba(249,115,22,0.45);
+  cursor: pointer;
+}
