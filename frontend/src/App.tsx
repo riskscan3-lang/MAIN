@@ -22,17 +22,15 @@ function AppShell() {
   const [activeView, setActiveView] = useState("home");
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [buyPlanId, setBuyPlanId] = useState(null);
-  const [billingMode, setBillingMode] = useState("standard");
   const wallet = useWallet();
 
   // Sync wallet → analytics + auto-track page_view on view change
   useEffect(() => { setTrackingWallet(wallet.address); }, [wallet.address]);
   useEffect(() => { trackEvent("page_view", activeView); }, [activeView]);
 
-  const handlePlanSelect = (planId, mode = "standard") => {
-    trackEvent("plan_buy_click", "plans", { plan_id: planId, billing_mode: mode });
+  const handlePlanSelect = (planId) => {
+    trackEvent("plan_buy_click", "plans", { plan_id: planId });
     setSelectedPlan(planId);
-    setBillingMode(mode);
     setBuyPlanId(planId);
   };
 
@@ -95,7 +93,6 @@ function AppShell() {
       {buyPlanId !== null && (
         <BuyPlanModal
           planId={buyPlanId}
-          billingMode={billingMode}
           onClose={() => setBuyPlanId(null)}
           onSuccess={goToDashboard}
         />
