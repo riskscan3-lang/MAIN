@@ -1,21 +1,35 @@
 // @ts-nocheck
-import { useState, useRef, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "./ui/button";
-import { Wallet, LogOut, ChevronDown, Loader2 } from "lucide-react";
+import { Wallet, LogOut, Loader2, X, Info } from "lucide-react";
 import { useWallet, shortAddress, CHAINS } from "../context/WalletContext";
 
 export function ConnectWalletButton({ compact = false }) {
   const wallet = useWallet();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const ref = useRef(null);
+  const [open, setOpen] = useState(false);
+  const [addr, setAddr] = useState("");
+  const [localError, setLocalError] = useState(null);
+  const inputRef = useRef(null);
 
   useEffect(() => {
-    const onClick = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
-  }, []);
+    if (open) {
+      setTimeout(() => inputRef.current?.focus(), 50);
+    } else {
+      setAddr("");
+      setLocalError(null);
+    }
+  }, [open]);
+
+  const handleSubmit = async (e) => {
+    e?.preventDefault?.();
+    setLocalError(null);
+    try {
+      await wallet.connect(addr, { source: "header" });
+      setOpen(false);
+    } catch (err) {
+      setLocalError(err?.message || "Failed to connect");
+    }
+  };
 
   if (wallet.isConnected) {
     const chain = wallet.chainId ? CHAINS[wallet.chainId] : null;
@@ -49,58 +63,84 @@ export function ConnectWalletButton({ compact = false }) {
     );
   }
 
-  const hasInjected = typeof window !== "undefined" && !!window.ethereum;
-
   return (
-    <div className="relative" ref={ref}>
+    <>
       <Button
         data-testid="connect-wallet-button"
-        onClick={() => setMenuOpen((o) => !o)}
+        onClick={() => setOpen(true)}
         disabled={wallet.connecting}
         className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-semibold shadow-lg shadow-orange-500/25"
       >
         {wallet.connecting
           ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Connecting…</>
-          : <><Wallet className="w-4 h-4 mr-2" /> Connect Wallet <ChevronDown className="w-3.5 h-3.5 ml-1 opacity-70" /></>}
+          : <><Wallet className="w-4 h-4 mr-2" /> Connect Wallet</>}
       </Button>
 
-      {menuOpen && (
+      {open && (
         <div
-          className="absolute right-0 mt-2 w-64 rounded-xl border border-slate-800 bg-slate-950 shadow-2xl p-2 z-50"
-          data-testid="wallet-chooser"
+          className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+          onClick={() => setOpen(false)}
+          data-testid="connect-modal"
         >
-          {hasInjected && (
-            <button
-              data-testid="choose-injected"
-              onClick={async () => { setMenuOpen(false); await wallet.connect(); }}
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-900 text-left"
-            >
-              <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center">
-                <Wallet className="w-4 h-4 text-white" />
-              </span>
-              <div className="flex-1">
-                <div className="text-sm font-medium">Browser Wallet</div>
-                <div className="text-[11px] text-slate-500">MetaMask, Coinbase, Trust (extension)</div>
-              </div>
-            </button>
-          )}
-          <button
-            data-testid="choose-walletconnect"
-            onClick={async () => { setMenuOpen(false); await wallet.connectWalletConnect(); }}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-900 text-left"
+          <div
+            className="relative w-full max-w-md bg-gradient-to-br from-slate-900 to-slate-950 border border-orange-500/30 rounded-2xl shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
           >
-            <span className="w-8 h-8 rounded-lg bg-[#3b99fc]/15 border border-[#3b99fc]/40 flex items-center justify-center">
-              <svg width="16" height="12" viewBox="0 0 40 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-                <path d="M8.19 4.84a16.7 16.7 0 0123.62 0l.78.78a.8.8 0 010 1.13l-2.68 2.68a.4.4 0 01-.56 0l-1.07-1.07a11.7 11.7 0 00-16.56 0l-1.15 1.15a.4.4 0 01-.56 0L7.33 6.83a.8.8 0 010-1.13l.86-.86zm29.18 5.44l2.38 2.38a.8.8 0 010 1.13l-10.77 10.77a.8.8 0 01-1.13 0l-7.65-7.65a.2.2 0 00-.28 0l-7.65 7.65a.8.8 0 01-1.13 0L.37 13.79a.8.8 0 010-1.13l2.38-2.38a.8.8 0 011.13 0l7.65 7.65a.2.2 0 00.28 0l7.65-7.65a.8.8 0 011.13 0l7.65 7.65a.2.2 0 00.28 0l7.65-7.65a.8.8 0 011.13 0z" fill="#3b99fc"/>
-              </svg>
-            </span>
-            <div className="flex-1">
-              <div className="text-sm font-medium">WalletConnect</div>
-              <div className="text-[11px] text-slate-500">Scan QR · 300+ mobile wallets</div>
+            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center">
+                  <Wallet className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-bold">Connect your wallet</h3>
+                  <p className="text-[11px] text-slate-500">Paste your EVM address to identify yourself</p>
+                </div>
+              </div>
+              <button onClick={() => setOpen(false)} className="text-slate-500 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
             </div>
-          </button>
+
+            <form onSubmit={handleSubmit} className="p-5 space-y-4">
+              <div>
+                <label className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold block mb-2">
+                  Wallet address
+                </label>
+                <input
+                  ref={inputRef}
+                  data-testid="header-wallet-address-input"
+                  type="text"
+                  placeholder="0x717e6e1c8539fc91d3a65f7b473fb8809429a5e5"
+                  value={addr}
+                  onChange={(e) => setAddr(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 font-mono text-sm text-white focus:outline-none focus:border-orange-500/60"
+                  autoComplete="off"
+                />
+              </div>
+
+              <div className="flex items-start gap-2 text-[11px] text-slate-400 bg-slate-900/60 border border-slate-800 rounded-lg px-3 py-2.5">
+                <Info className="w-3.5 h-3.5 text-orange-400 mt-0.5 flex-shrink-0" />
+                <span>
+                  Your address is used as your identity to track plan purchases and activity. We never request a signature or move funds — payments are sent manually from your wallet.
+                </span>
+              </div>
+
+              {(localError || wallet.error) && (
+                <p className="text-xs text-red-400">{localError || wallet.error}</p>
+              )}
+
+              <Button
+                data-testid="header-connect-submit"
+                type="submit"
+                disabled={wallet.connecting || !addr}
+                className="w-full bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 py-5 font-semibold disabled:opacity-50"
+              >
+                {wallet.connecting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Connecting…</> : "Connect"}
+              </Button>
+            </form>
+          </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

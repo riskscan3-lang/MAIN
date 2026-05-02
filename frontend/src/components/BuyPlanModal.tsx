@@ -1,8 +1,8 @@
 // @ts-nocheck
-import { useState, useMemo, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Wallet, Loader2, ExternalLink, CheckCircle2, AlertTriangle, X,
-  Copy, Check, Twitter, Send as SendIcon, Sparkles,
+  Copy, Check, Twitter, Send as SendIcon, Sparkles, Info,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import {
@@ -12,50 +12,58 @@ import {
   RECIPIENT_ADDRESS,
   shortAddress,
   explorerTxUrl,
+  isValidAddress,
 } from "../context/WalletContext";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 const PLAN_PRICING = {
-  1: { name: "Pool Plan", usd: 250, native: 0.0001 },
-  2: { name: "Solo Miner", usd: 2500, native: 0.001 },
-  3: { name: "Dual Miner", usd: 5000, native: 0.002 },
-  4: { name: "Multi Rig", usd: 10000, native: 0.004 },
+  1: { name: "Pool Plan",  usd: 250,    native: 0.0001 },
+  2: { name: "Solo Miner", usd: 2500,   native: 0.001  },
+  3: { name: "Dual Miner", usd: 5000,   native: 0.002  },
+  4: { name: "Multi Rig",  usd: 10000,  native: 0.004  },
 };
 const CHAIN_ETA = { 1: 180, 137: 30, 56: 15 };
 const TOKEN_OPTIONS = ["USDT", "USDC", "NATIVE"];
+
+const TX_HASH_RE = /^0x[a-fA-F0-9]{64}$/;
+const isValidTxHash = (h) => typeof h === "string" && TX_HASH_RE.test(h.trim());
 
 const buildReferralCode = (address) => {
   if (!address) return "XMRMINE";
   return `XMR-${address.replace("0x", "").slice(-6).toUpperCase()}`;
 };
 const buildShareText = (planName, refCode) =>
-  `Just activated my ${planName} plan on MONERO RIG 🚀⛏️ Earning passive Monero with zero hardware. Use my ref code ${refCode} for a 5% bonus → `;
+  `Just activated my ${planName} plan on MONERO RIG ⛏️ Earning passive Monero with zero hardware. Use my ref code ${refCode} for a 5% bonus → `;
 
 export function BuyPlanModal({ planId, onClose, onSuccess }) {
   const wallet = useWallet();
   const [chainId, setChainId] = useState(1);
   const [tokenType, setTokenType] = useState("USDT");
+  const [step, setStep] = useState("setup"); // setup | confirm | success
   const [submitting, setSubmitting] = useState(false);
-  const [txHash, setTxHash] = useState(null);
+  const [txHashInput, setTxHashInput] = useState("");
+  const [confirmedTxHash, setConfirmedTxHash] = useState(null);
   const [error, setError] = useState(null);
-  const [copied, setCopied] = useState(false);
+  const [copiedField, setCopiedField] = useState(null); // 'address' | 'amount' | 'hash'
   const [secondsLeft, setSecondsLeft] = useState(0);
+  const [walletAddrInput, setWalletAddrInput] = useState("");
 
   const plan = PLAN_PRICING[planId] || PLAN_PRICING[3];
   const selectedChain = CHAINS[chainId];
-  const amountLabel = tokenType === "NATIVE"
+  const amountValue = tokenType === "NATIVE"
     ? `${plan.native} ${selectedChain?.nativeSymbol}`
     : `${plan.usd} ${tokenType}`;
+  const amountNumber = tokenType === "NATIVE" ? plan.native : plan.usd;
   const referralCode = useMemo(() => buildReferralCode(wallet.address), [wallet.address]);
 
   useEffect(() => {
-    if (!txHash) return;
+    if (step !== "success") return;
     setSecondsLeft(CHAIN_ETA[chainId] || 60);
     const id = setInterval(() => setSecondsLeft((s) => (s > 0 ? s - 1 : 0)), 1000);
     return () => clearInterval(id);
-  }, [txHash, chainId]);
+  }, [step, chainId]);
 
   const formatEta = (s) => {
     if (s <= 0) return "Confirming…";
@@ -63,49 +71,63 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
     return m > 0 ? `${m}m ${sec.toString().padStart(2, "0")}s` : `${sec}s`;
   };
 
-  const copyHash = async () => {
+  const copy = async (value, label) => {
     try {
-      await navigator.clipboard.writeText(txHash);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
+      await navigator.clipboard.writeText(value);
+      setCopiedField(label);
+      setTimeout(() => setCopiedField(null), 1800);
     } catch (_) {}
   };
 
-  const handlePay = async () => {
+  const handleConnect = async (e) => {
+    e?.preventDefault?.();
     setError(null);
+    try {
+      await wallet.connect(walletAddrInput, { source: "manual", chainId });
+      setWalletAddrInput("");
+    } catch (err) {
+      setError(err?.message || "Failed to connect");
+    }
+  };
+
+  const handleSubmitTx = async (e) => {
+    e?.preventDefault?.();
+    setError(null);
+    const hash = txHashInput.trim();
+    if (!isValidTxHash(hash)) {
+      setError("Invalid transaction hash. Must start with 0x and be 66 characters.");
+      return;
+    }
     setSubmitting(true);
     try {
-      await wallet.ensureChain(chainId);
-      let hash;
-      if (tokenType === "NATIVE") {
-        hash = await wallet.sendNative({ chainId, recipient: RECIPIENT_ADDRESS, amount: plan.native });
-      } else {
-        hash = await wallet.sendERC20({ chainId, tokenType, recipient: RECIPIENT_ADDRESS, amount: plan.usd });
+      const resp = await fetch(`${API}/purchases`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan_id: String(planId),
+          plan_name: plan.name,
+          buyer_address: wallet.address,
+          amount: tokenType === "NATIVE" ? String(plan.native) : String(plan.usd),
+          chain: chainId,
+          tx_hash: hash,
+          token_type: tokenType,
+        }),
+      });
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        throw new Error(body?.detail?.[0]?.msg || body?.detail || "Failed to record purchase");
       }
-      setTxHash(hash);
-      try {
-        await fetch(`${API}/purchases`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            plan_id: String(planId),
-            plan_name: plan.name,
-            buyer_address: wallet.address,
-            amount: tokenType === "NATIVE" ? String(plan.native) : String(plan.usd),
-            chain: chainId,
-            tx_hash: hash,
-            token_type: tokenType,
-          }),
-        });
-      } catch (e) { console.warn("Backend record failed", e); }
+      setConfirmedTxHash(hash);
+      setStep("success");
     } catch (e) {
-      setError(e?.shortMessage || e?.message || "Transaction failed");
+      setError(e?.message || "Failed to submit transaction");
     } finally {
       setSubmitting(false);
     }
   };
 
   const supportedChains = SUPPORTED_CHAIN_IDS.map((id) => CHAINS[id]);
+  const explorerHostFor = (cid) => CHAINS[cid]?.explorer || "";
 
   return (
     <div
@@ -126,51 +148,60 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
               <Wallet className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h3 className="text-lg font-bold">{txHash ? `${plan.name} activated` : `Activate ${plan.name}`}</h3>
-              <p className="text-xs text-slate-400">{txHash ? "Pending confirmation on-chain" : "Pay with crypto · Instant activation"}</p>
+              <h3 className="text-lg font-bold">
+                {step === "success" ? `${plan.name} activated` : `Activate ${plan.name}`}
+              </h3>
+              <p className="text-xs text-slate-400">
+                {step === "success" ? "Pending confirmation on-chain" : "Pay with crypto · Manual on-chain transfer"}
+              </p>
             </div>
           </div>
         </div>
 
         <div className="p-6 space-y-5">
-          {!txHash && (
+          {step !== "success" && (
             <>
-              {/* Wallet connection */}
+              {/* Wallet identity */}
               {!wallet.isConnected ? (
-                <div className="space-y-2">
-                  <p className="text-sm text-slate-400 mb-2">Connect your wallet to continue</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <Button
-                      data-testid="modal-connect-injected"
-                      onClick={() => wallet.connect()}
-                      disabled={wallet.connecting}
-                      className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 py-6 font-semibold"
-                    >
-                      {wallet.connecting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Connecting…</> : <><Wallet className="w-4 h-4 mr-2" /> Browser Wallet</>}
-                    </Button>
-                    <Button
-                      data-testid="modal-connect-walletconnect"
-                      onClick={() => wallet.connectWalletConnect()}
-                      disabled={wallet.connecting}
-                      variant="outline"
-                      className="border-slate-700 hover:bg-slate-800 py-6 font-semibold"
-                    >
-                      WalletConnect (QR)
-                    </Button>
-                  </div>
+                <form onSubmit={handleConnect} className="space-y-2">
+                  <p className="text-sm text-slate-400">
+                    Enter the wallet address you'll be paying from. We'll use it to track your purchase.
+                  </p>
+                  <input
+                    data-testid="wallet-address-input"
+                    type="text"
+                    placeholder="0x717e6e1c8539fc91d3a65f7b473fb8809429a5e5"
+                    value={walletAddrInput}
+                    onChange={(e) => setWalletAddrInput(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 font-mono text-sm text-white focus:outline-none focus:border-orange-500/60"
+                    autoComplete="off"
+                  />
+                  <Button
+                    data-testid="modal-connect-wallet"
+                    type="submit"
+                    disabled={wallet.connecting || !walletAddrInput}
+                    className="w-full bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 py-5 font-semibold disabled:opacity-50"
+                  >
+                    {wallet.connecting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Connecting…</> : <><Wallet className="w-4 h-4 mr-2" /> Connect Wallet</>}
+                  </Button>
                   {wallet.error && <p className="text-xs text-red-400">{wallet.error}</p>}
-                </div>
+                </form>
               ) : (
                 <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
                   <div>
-                    <p className="text-[11px] uppercase tracking-wider text-slate-500">Connected wallet</p>
+                    <p className="text-[11px] uppercase tracking-wider text-slate-500">Your wallet</p>
                     <p className="font-mono text-sm" data-testid="connected-address">{shortAddress(wallet.address)}</p>
                   </div>
-                  <span className="text-xs px-2 py-1 rounded-full bg-green-500/15 text-green-400 border border-green-500/30">Live</span>
+                  <button
+                    onClick={wallet.disconnect}
+                    className="text-xs px-2 py-1 rounded-full bg-slate-900 border border-slate-800 text-slate-400 hover:text-red-400 hover:border-red-500/40"
+                  >
+                    Change
+                  </button>
                 </div>
               )}
 
-              {/* Chain selector */}
+              {/* Network */}
               <div>
                 <p className="text-xs uppercase tracking-wider text-slate-500 mb-2">Select network</p>
                 <div className="grid grid-cols-3 gap-2">
@@ -221,29 +252,92 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
                 </div>
               </div>
 
-              {/* Summary */}
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2 text-sm">
-                <div className="flex items-center justify-between text-slate-400"><span>Plan</span><span className="text-white font-medium">{plan.name}</span></div>
-                <div className="flex items-center justify-between text-slate-400"><span>Network</span><span className="text-white font-medium">{selectedChain?.name}</span></div>
-                <div className="flex items-center justify-between text-slate-400"><span>Recipient</span><span className="font-mono text-xs text-white">{shortAddress(RECIPIENT_ADDRESS)}</span></div>
-                <div className="border-t border-slate-800 pt-2 flex items-center justify-between">
-                  <span className="text-slate-400">You pay</span>
-                  <span className="text-lg font-bold text-orange-400" data-testid="pay-amount">{amountLabel}</span>
+              {/* Payment instructions */}
+              <div className="bg-gradient-to-br from-orange-500/10 to-amber-500/5 border border-orange-500/30 rounded-xl p-4 space-y-3">
+                <div className="flex items-center gap-2 text-orange-300 text-xs uppercase tracking-wider font-semibold">
+                  <Info className="w-3.5 h-3.5" />
+                  Send manually from your wallet
+                </div>
+                <div className="space-y-2 text-sm">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-1">Recipient address</p>
+                    <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2">
+                      <code className="flex-1 text-xs font-mono text-white truncate" data-testid="recipient-address">
+                        {RECIPIENT_ADDRESS}
+                      </code>
+                      <button
+                        onClick={() => copy(RECIPIENT_ADDRESS, "address")}
+                        data-testid="copy-recipient"
+                        className="p-1.5 rounded-md bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300"
+                        title="Copy"
+                      >
+                        {copiedField === "address" ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-1">Amount</p>
+                    <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2">
+                      <code className="flex-1 text-base font-bold text-orange-400" data-testid="pay-amount">
+                        {amountValue}
+                      </code>
+                      <button
+                        onClick={() => copy(String(amountNumber), "amount")}
+                        data-testid="copy-amount"
+                        className="p-1.5 rounded-md bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300"
+                        title="Copy"
+                      >
+                        {copiedField === "amount" ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between pt-1 text-xs">
+                    <span className="text-slate-500">Network</span>
+                    <span className="text-white font-medium">{selectedChain?.name}</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-relaxed pt-1">
+                    Use any wallet (MetaMask, Trust Wallet, exchange withdrawal) to send the exact amount on the {selectedChain?.name} network. <strong className="text-amber-300">Do not use a different network</strong> — funds may be lost.
+                  </p>
                 </div>
               </div>
 
-              <Button
-                data-testid="modal-pay-button"
-                onClick={handlePay}
-                disabled={!wallet.isConnected || submitting}
-                className="w-full bg-gradient-to-r from-orange-500 via-amber-500 to-yellow-500 hover:from-orange-600 hover:via-amber-600 hover:to-yellow-600 py-6 font-bold text-base shadow-lg shadow-orange-500/30 disabled:opacity-50"
-              >
-                {submitting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Awaiting confirmation…</> : <>Pay {amountLabel}</>}
-              </Button>
+              {/* TX hash submission */}
+              <form onSubmit={handleSubmitTx} className="space-y-2">
+                <label className="text-xs uppercase tracking-wider text-slate-500 font-semibold flex items-center gap-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-green-400" />
+                  Paste transaction hash
+                </label>
+                <input
+                  data-testid="tx-hash-input"
+                  type="text"
+                  placeholder="0x… (66-character transaction hash)"
+                  value={txHashInput}
+                  onChange={(e) => setTxHashInput(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 font-mono text-xs text-white focus:outline-none focus:border-orange-500/60"
+                  autoComplete="off"
+                />
+                <p className="text-[11px] text-slate-600">
+                  Find it in your wallet's "Activity" tab right after sending, or on{" "}
+                  <a href={explorerHostFor(chainId)} target="_blank" rel="noreferrer" className="text-orange-400 hover:underline">
+                    {explorerHostFor(chainId).replace("https://", "")}
+                  </a>{" "}
+                  by searching your address.
+                </p>
+                <Button
+                  data-testid="modal-submit-tx"
+                  type="submit"
+                  disabled={!wallet.isConnected || submitting || !txHashInput}
+                  className="w-full bg-gradient-to-r from-orange-500 via-amber-500 to-yellow-500 hover:from-orange-600 hover:via-amber-600 hover:to-yellow-600 py-6 font-bold text-base shadow-lg shadow-orange-500/30 disabled:opacity-50"
+                >
+                  {submitting
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Submitting…</>
+                    : <>I've sent {amountValue} — Activate plan</>}
+                </Button>
+              </form>
             </>
           )}
 
-          {txHash && (
+          {step === "success" && confirmedTxHash && (
             <div data-testid="activation-view" className="space-y-5 animate-fade-in-up">
               <div className="relative text-center pt-2">
                 <div className="absolute inset-x-0 top-0 mx-auto w-32 h-32 bg-green-500/20 rounded-full blur-3xl" />
@@ -251,7 +345,7 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
                   <CheckCircle2 className="w-10 h-10 text-green-400" />
                 </div>
                 <h3 className="text-2xl font-bold mb-1">Activation Pending</h3>
-                <p className="text-sm text-slate-400">Your {plan.name} plan will be live once the transaction confirms.</p>
+                <p className="text-sm text-slate-400">Your {plan.name} plan will be live once the transaction confirms on-chain.</p>
               </div>
 
               <div className="bg-gradient-to-br from-orange-500/10 to-amber-500/10 border border-orange-500/30 rounded-xl p-4 flex items-center justify-between">
@@ -265,12 +359,23 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
               <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
                 <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-1.5">Transaction hash</p>
                 <div className="flex items-center gap-2">
-                  <code className="flex-1 text-xs font-mono text-slate-300 truncate" data-testid="tx-hash">{txHash}</code>
-                  <button data-testid="copy-tx-hash" onClick={copyHash} className="p-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300" title="Copy">
-                    {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+                  <code className="flex-1 text-xs font-mono text-slate-300 truncate" data-testid="tx-hash">{confirmedTxHash}</code>
+                  <button
+                    data-testid="copy-tx-hash"
+                    onClick={() => copy(confirmedTxHash, "hash")}
+                    className="p-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300"
+                    title="Copy"
+                  >
+                    {copiedField === "hash" ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
                   </button>
-                  <a href={explorerTxUrl(chainId, txHash)} target="_blank" rel="noreferrer" data-testid="tx-explorer-link"
-                    className="p-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-orange-400" title="View on explorer">
+                  <a
+                    href={explorerTxUrl(chainId, confirmedTxHash)}
+                    target="_blank"
+                    rel="noreferrer"
+                    data-testid="tx-explorer-link"
+                    className="p-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-orange-400"
+                    title="View on explorer"
+                  >
                     <ExternalLink className="w-4 h-4" />
                   </a>
                 </div>
@@ -327,7 +432,7 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
             </div>
           )}
 
-          {!txHash && (
+          {step !== "success" && (
             <p className="text-[11px] text-slate-600 text-center leading-relaxed">
               Verify recipient address before paying. Past performance does not guarantee future results.
             </p>
