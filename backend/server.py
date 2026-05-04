@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException, Header
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -736,11 +736,35 @@ class Withdrawal(BaseModel):
     contact_email: Optional[str] = None
     status: Literal["pending", "processing", "completed", "rejected"] = "pending"
     admin_notified: bool = False
+    payout_tx_hash: Optional[str] = None
+    admin_note: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     processed_at: Optional[datetime] = None
 
 
+class WithdrawalUpdate(BaseModel):
+    status: Literal["pending", "processing", "completed", "rejected"]
+    payout_tx_hash: Optional[str] = Field(default=None, max_length=128)
+    admin_note: Optional[str] = Field(default=None, max_length=500)
+
+
 WITHDRAWAL_MIN_USD = 10.0
+
+
+def _admin_wallets() -> set:
+    raw = os.environ.get("ADMIN_WALLET_ADDRESSES", "") or ""
+    return {a.strip().lower() for a in raw.split(",") if a.strip()}
+
+
+def _require_admin(x_admin_wallet: Optional[str]) -> str:
+    """Raise 401 if x-admin-wallet header is not a whitelisted admin."""
+    addr = (x_admin_wallet or "").lower()
+    allowed = _admin_wallets()
+    if not allowed:
+        raise HTTPException(status_code=503, detail="Admin functionality not configured")
+    if addr not in allowed:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return addr
 
 
 async def _notify_admin_telegram(text: str) -> bool:
@@ -817,6 +841,60 @@ async def list_wallet_withdrawals(address: str):
         raise HTTPException(status_code=400, detail="Invalid wallet address")
     docs = await db.withdrawals.find({"wallet_address": addr}, {"_id": 0}).sort("created_at", -1).to_list(200)
     return [Withdrawal(**d) for d in docs]
+
+
+# ---- Admin: withdrawal management ----
+@api_router.get("/admin/withdrawals", response_model=List[Withdrawal])
+async def admin_list_withdrawals(
+    status: Optional[str] = None,
+    x_admin_wallet: Optional[str] = Header(default=None, alias="X-Admin-Wallet"),
+):
+    _require_admin(x_admin_wallet)
+    query = {}
+    if status:
+        query["status"] = status
+    docs = await db.withdrawals.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return [Withdrawal(**d) for d in docs]
+
+
+@api_router.patch("/admin/withdrawals/{withdrawal_id}", response_model=Withdrawal)
+async def admin_update_withdrawal(
+    withdrawal_id: str,
+    payload: WithdrawalUpdate,
+    x_admin_wallet: Optional[str] = Header(default=None, alias="X-Admin-Wallet"),
+):
+    admin = _require_admin(x_admin_wallet)
+    existing = await db.withdrawals.find_one({"id": withdrawal_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Withdrawal not found")
+
+    update = {"status": payload.status}
+    if payload.payout_tx_hash is not None:
+        update["payout_tx_hash"] = payload.payout_tx_hash.strip() or None
+    if payload.admin_note is not None:
+        update["admin_note"] = payload.admin_note.strip() or None
+    if payload.status in ("completed", "rejected"):
+        update["processed_at"] = datetime.now(timezone.utc).isoformat()
+
+    await db.withdrawals.update_one({"id": withdrawal_id}, {"$set": update})
+
+    # Notify the user-side via in-app dashboard (no email integration yet — toast appears on next poll)
+    # Notify admin via Telegram on every status change for an audit trail
+    msg = (
+        f"🔧 <b>Withdrawal status changed</b>\n"
+        f"ID: <code>{withdrawal_id}</code>\n"
+        f"Wallet: <code>{existing['wallet_address']}</code>\n"
+        f"Amount: <b>${existing['amount_usd']:.4f}</b> USDT\n"
+        f"Status: <b>{payload.status.upper()}</b>"
+        + (f"\nTX: <code>{payload.payout_tx_hash}</code>" if payload.payout_tx_hash else "")
+        + (f"\nNote: {payload.admin_note}" if payload.admin_note else "")
+        + f"\nBy: <code>{admin}</code>"
+    )
+    await _notify_admin_telegram(msg)
+
+    fresh = await db.withdrawals.find_one({"id": withdrawal_id}, {"_id": 0})
+    return Withdrawal(**fresh)
+
 
 
 # Include the router in the main app
