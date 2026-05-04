@@ -8,9 +8,10 @@ import { useWallet } from "../context/WalletContext";
 interface HeaderProps {
   activeView: string;
   setActiveView: (view: string) => void;
+  isAdmin?: boolean;
 }
 
-export function Header({ activeView, setActiveView }: HeaderProps) {
+export function Header({ activeView, setActiveView, isAdmin = false }: HeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [resourcesOpen, setResourcesOpen] = useState(false);
 
@@ -23,9 +24,10 @@ export function Header({ activeView, setActiveView }: HeaderProps) {
     { id: "faq", label: "FAQ" },
     { id: "contact", label: "Contact" },
   ];
-  const navItems = wallet.isConnected
+  let navItems = wallet.isConnected
     ? [...baseNavItems, { id: "activity", label: "My Activity" }]
     : baseNavItems;
+  if (isAdmin) navItems = [...navItems, { id: "admin", label: "Admin" }];
 
   const resourceItems = [
     { id: "privacy", label: "Privacy Policy" },

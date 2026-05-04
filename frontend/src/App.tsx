@@ -6,6 +6,7 @@ import { Plans } from "./components/Plans";
 import { ProfitCalculator } from "./components/ProfitCalculator";
 import { MiningDashboard } from "./components/MiningDashboard";
 import { Rewards } from "./components/Rewards";
+import { AdminPanel } from "./components/AdminPanel";
 import { Toaster } from "./components/ui/sonner";
 import { Stats } from "./components/Stats";
 import { Footer } from "./components/Footer";
@@ -21,11 +22,18 @@ import { LiveChat } from "./components/LiveChat";
 import { WalletProvider, useWallet } from "./context/WalletContext";
 import { trackEvent, setTrackingWallet } from "./utils/analytics";
 
+// Admin wallets allowed to access /admin view (from env, comma separated)
+const ADMIN_WALLETS = (process.env.REACT_APP_ADMIN_WALLETS || "")
+  .split(",")
+  .map((a) => a.trim().toLowerCase())
+  .filter(Boolean);
+
 function AppShell() {
   const [activeView, setActiveView] = useState("home");
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [buyPlanId, setBuyPlanId] = useState(null);
   const wallet = useWallet();
+  const isAdmin = !!wallet.address && ADMIN_WALLETS.includes(wallet.address.toLowerCase());
 
   // Sync wallet → analytics + auto-track page_view on view change
   useEffect(() => { setTrackingWallet(wallet.address); }, [wallet.address]);
@@ -100,6 +108,8 @@ function AppShell() {
         return <Contact />;
       case "activity":
         return <MyActivity />;
+      case "admin":
+        return <AdminPanel adminWallets={ADMIN_WALLETS} />;
       default:
         return (
           <>
@@ -121,7 +131,7 @@ function AppShell() {
         <div className="absolute bottom-0 left-1/3 w-[500px] h-[500px] bg-yellow-500/5 rounded-full blur-3xl" />
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(249,115,22,0.15),transparent_60%)]" />
       </div>
-      <Header activeView={activeView} setActiveView={setActiveView} />
+      <Header activeView={activeView} setActiveView={setActiveView} isAdmin={isAdmin} />
       <main className="min-h-screen relative" data-testid={`view-${activeView}`}>
         {renderPage()}
       </main>

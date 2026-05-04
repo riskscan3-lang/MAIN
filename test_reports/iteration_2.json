@@ -1,0 +1,56 @@
+{
+  "summary": "Tested Monero Rig admin withdrawal flow + frontend admin gating. Backend: 18/18 pytest cases pass (auth enforcement, pending→processing→completed state machine, rejected + admin_note, 404, filter, regression on xmr/price, referrals, purchases). Frontend: verified Admin nav link is hidden when wallet not connected, and Home/Dashboard/Rewards/About/FAQ/Contact render without crashes. Could not exercise an admin-connected flow (real WalletConnect required) but validated the gating code path.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PATCH /api/admin/withdrawals/{id}", "issue": "No state-machine validation — admin can jump from pending → completed directly, or from completed back to pending. Consider enforcing allowed transitions (e.g. pending→processing→completed, pending→rejected)."},
+      {"endpoint": "PATCH /api/admin/withdrawals/{id}", "issue": "When status=completed, payout_tx_hash is optional — the Telegram audit message shows TX only if provided, but business logic should probably REQUIRE payout_tx_hash on completed (it is enforced only on the frontend via window.prompt)."},
+      {"endpoint": "GET /api/admin/withdrawals", "issue": "status query param is not validated against the Literal set — e.g. ?status=foobar silently returns an empty list instead of 422."},
+      {"endpoint": "GET /api/xmr/price", "issue": "Returns {price_usd, source, fetched_at} — the original test-case plan referred to a 'price' key; contract is price_usd. This is a naming inconsistency worth flagging but not a bug."},
+      {"endpoint": "/admin/* routes", "issue": "_require_admin() raises 503 if ADMIN_WALLET_ADDRESSES is empty. That is correct fail-closed behavior but should be documented."},
+      {"endpoint": "POST /api/withdrawals", "issue": "amount_xmr is computed with fallback xmr_price=165.0 when cache is empty — this is silently off from the real CoinGecko price (~$401 today). Consider making the cache warm-start or blocking if price is unknown."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Hero", "issues": ["The 'Live Pool Stats' panel on the right overlaps slightly with the hero H1 when viewport is exactly 1920px — the translucent card partially covers 'with Professional Hardware' text causing mild contrast loss. Minor, non-blocking."]}
+    ],
+    "testability_notes": [
+      "Added data-testid='admin-gate' to the Gate component in AdminPanel.tsx so future automated tests can assert the unauthorized state without depending on copy.",
+      "Footer nav links for privacy / terms do not carry data-testid='nav-privacy' or 'footer-privacy'. Consider adding them for easier e2e coverage."
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_admin_withdrawals.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/admin_withdrawals.xml"
+  ],
+  "action_items": [
+    "Consider enforcing state-machine transitions on PATCH /api/admin/withdrawals/{id}.",
+    "Consider requiring payout_tx_hash at the API level when status=completed.",
+    "Validate ?status query param against the withdrawal Literal set (422 on bad value).",
+    "Add data-testid to footer privacy/terms links for better e2e coverage (low priority)."
+  ],
+  "critical_code_review_comments": [
+    "Admin gating is correctly implemented: ADMIN_WALLETS parsed from env, Header only renders nav-admin when isAdmin=true, AdminPanel short-circuits to Gate when wallet not connected or not admin.",
+    "_require_admin correctly lowercases X-Admin-Wallet and fails closed if ADMIN_WALLET_ADDRESSES env is empty.",
+    "Withdrawal creation correctly blocks duplicate pending/processing rows via 409 and enforces min $10 plus prior purchase existence.",
+    "PATCH endpoint sets processed_at only on completed/rejected — correct.",
+    "Telegram notifications are fire-and-forget (best-effort) and do not block API responses — good.",
+    "server.py is 911 lines — over the 700-line guideline; consider splitting admin + withdrawals into a separate router module.",
+    "MongoDB ObjectId is correctly excluded (projection {_id: 0}) in every admin/wallet read."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_admin_withdrawals.py (new, 18 tests)",
+    "/app/frontend/src/components/AdminPanel.tsx (added data-testid='admin-gate' to Gate component for testability)"
+  ],
+  "success_rate": {"backend": "100% (18/18)", "frontend": "100% on the paths we could exercise without a real wallet"},
+  "test_credentials": "Admin wallet: 0x717e6e1c8539fc91d3a65f7b473fb8809429a5e5 used as X-Admin-Wallet header. test_credentials.md is empty — no user/pass auth exists, so no creds required.",
+  "seed_data_creation": "Tests create TEST_ prefixed purchases and multiple withdrawals (pending, completed, rejected) in the withdrawals and purchases collections. Telegram admin bot 7567036563 receives real audit pings on every withdrawal create + status change — expected by product requirements.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend admin withdrawal endpoints fully covered by /app/backend/tests/test_admin_withdrawals.py (18 tests, all passing). Re-run with: pytest /app/backend/tests/ -v. Frontend wallet-connected paths (AdminPanel table, mark-processing/completed/rejected buttons, 30s toast polling) could not be tested in Playwright because WalletConnect requires a real signer. Main agent should self-test those via manual browser with an admin MetaMask wallet, or mock the WalletContext for component-level tests. Added data-testid='admin-gate' to AdminPanel Gate component.",
+  "rca of the issue": "No bugs to RCA — everything under test passed. The only pre-existing test-side mismatch was an assumption about /api/xmr/price returning 'price' instead of 'price_usd' which I fixed in my test file."
+}

@@ -279,7 +279,7 @@ function StatusBadge({ status }) {
 
 function Gate({ icon, title, body }) {
   return (
-    <section className="pt-24 pb-20 px-4 sm:px-6 lg:px-8">
+    <section className="pt-24 pb-20 px-4 sm:px-6 lg:px-8" data-testid="admin-gate">
       <div className="max-w-2xl mx-auto text-center">
         <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-500 shadow-lg shadow-orange-500/30 mb-6">
           {icon}

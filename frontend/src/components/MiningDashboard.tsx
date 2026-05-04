@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
@@ -118,6 +118,50 @@ export function MiningDashboard({ planId, setActiveView }: MiningDashboardProps)
       if (r.ok) setWithdrawals(await r.json());
     } catch (_) {}
   };
+
+  // Poll withdrawals every 30s; when a status flips (e.g. pending → completed)
+  // surface a toast so the user knows their payout was processed.
+  const seenStatusRef = useRef({}); // { [withdrawalId]: lastStatus }
+  useEffect(() => {
+    if (!wallet.isConnected) return;
+    // Seed: don't fire toasts for the initial snapshot, only future changes.
+    const initial = {};
+    for (const w of withdrawals) initial[w.id] = w.status;
+    seenStatusRef.current = initial;
+  }, [wallet.address]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!wallet.isConnected || !wallet.address) return;
+    const STATUS_COPY = {
+      processing: { type: "info",    title: "Withdrawal in processing", body: "An admin is preparing your XMR payout." },
+      completed:  { type: "success", title: "Withdrawal sent!",         body: "Your XMR payout has been broadcast. Check your wallet." },
+      rejected:   { type: "error",   title: "Withdrawal rejected",      body: "Please contact support if this is unexpected." },
+    };
+    const poll = async () => {
+      try {
+        const r = await fetch(`${API}/wallet/${wallet.address}/withdrawals`);
+        if (!r.ok) return;
+        const list = await r.json();
+        if (!Array.isArray(list)) return;
+        const seen = seenStatusRef.current;
+        for (const w of list) {
+          const prev = seen[w.id];
+          if (prev && prev !== w.status && STATUS_COPY[w.status]) {
+            const meta = STATUS_COPY[w.status];
+            const fn = meta.type === "success" ? toast.success : meta.type === "error" ? toast.error : toast.info;
+            fn(meta.title, {
+              description: `${meta.body} (≈ $${Number(w.amount_usd || 0).toFixed(2)} USDT)`,
+              duration: 8000,
+            });
+          }
+          seen[w.id] = w.status;
+        }
+        setWithdrawals(list);
+      } catch (_) {}
+    };
+    const id = setInterval(poll, 30000);
+    return () => clearInterval(id);
+  }, [wallet.isConnected, wallet.address]);
 
   // 1-second tick — drives every real-time stat in the UI
   useEffect(() => {
