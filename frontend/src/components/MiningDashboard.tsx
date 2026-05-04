@@ -1,160 +1,353 @@
 // @ts-nocheck
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
-import { Pickaxe, Clock, Wallet, Activity, Cpu, Zap, ArrowRight } from "lucide-react";
+import { Pickaxe, Clock, Wallet, Activity, Cpu, Zap, ArrowRight, Loader2, ShoppingBag, ExternalLink } from "lucide-react";
 import { XmrPriceChart } from "./XmrPriceChart";
 import { WorkerPool } from "./WorkerPool";
 import { MiningLogs } from "./MiningLogs";
+import { ConnectWalletButton } from "./ConnectWalletButton";
+import { useWallet, explorerTxUrl, shortAddress } from "../context/WalletContext";
 
-interface MiningDashboardProps {
-  planId: number | null;
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const API = `${BACKEND_URL}/api`;
+
+// Plan catalogue (must mirror /components/Plans.tsx + /components/ProfitCalculator.tsx)
+const PLAN_META = {
+  "1": { name: "Pool Plan",  hashrateHs: 2500,   dailyUSD: 1.3863014,  annualROIPct: 102.40, contractDays: 365 },
+  "2": { name: "Solo Miner", hashrateHs: 25000,  dailyUSD: 14.0547945, annualROIPct: 105.20, contractDays: 365 },
+  "3": { name: "Dual Miner", hashrateHs: 60000,  dailyUSD: 31.8575343, annualROIPct: 132.56, contractDays: 365 },
+  "4": { name: "Multi Rig",  hashrateHs: 150000, dailyUSD: 65.5890411, annualROIPct: 139.40, contractDays: 365 },
+};
+
+const fmtUSD = (n) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmtUSDFine = (n) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`;
+
+function formatDuration(seconds) {
+  const s = Math.max(0, Math.floor(seconds));
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (d > 0) return `${d}d ${h.toString().padStart(2, "0")}h ${m.toString().padStart(2, "0")}m`;
+  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${sec.toString().padStart(2, "0")}`;
 }
 
-const plans = [
-  {
-    id: 1,
-    name: "Pool Plan",
-    hashrate: "2500",
-    price: "$250 USDT",
-    dailyEarnings: 1.3863,
-    monthlyROI: "102.40%"
-  },
-  {
-    id: 2,
-    name: "Solo Miner",
-    hashrate: "25000",
-    price: "$2,500 USDT",
-    dailyEarnings: 14.0548,
-    monthlyROI: "105.20%"
-  },
-  {
-    id: 3,
-    name: "Dual Miner",
-    hashrate: "60000",
-    price: "$5,000 USDT",
-    dailyEarnings: 31.8575,
-    monthlyROI: "132.56%"
-  },
-  {
-    id: 4,
-    name: "Multi Rig",
-    hashrate: "150000",
-    price: "$10,000 USDT",
-    dailyEarnings: 65.5890,
-    monthlyROI: "139.40%"
-  }
-];
+function timeAgo(ts) {
+  const sec = Math.floor((Date.now() - ts) / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const m = Math.floor(sec / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+interface MiningDashboardProps {
+  planId?: number | null;
+}
 
 export function MiningDashboard({ planId }: MiningDashboardProps) {
-  const [hashrate, setHashrate] = useState(0);
-  const [usdtEarned, setUsdtEarned] = useState(0);
-  const [uptime, setUptime] = useState(0);
-  const [blocks, setBlocks] = useState(0);
-  const [isMining, setIsMining] = useState(false);
-  const [timeElapsed, setTimeElapsed] = useState(0);
+  const wallet = useWallet();
+  const [purchases, setPurchases] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [tick, setTick] = useState(0); // re-render every 1s
 
-  const selectedPlan = plans.find(p => p.id === planId) || plans[2];
-
+  // Fetch purchases when wallet connects / changes
   useEffect(() => {
-    if (!isMining) return;
-
-    const interval = setInterval(() => {
-      setHashrate(prev => {
-        const target = parseInt(selectedPlan.hashrate);
-        return prev < target ? prev + Math.floor(Math.random() * 500) + 100 : target;
-      });
-      
-      setUsdtEarned(prev => prev + (selectedPlan.dailyEarnings / 86400) * 0.1);
-      setUptime(prev => Math.min(prev + 0.1, 99.99));
-      setTimeElapsed(prev => prev + 1);
-      
-      if (Math.random() > 0.97) {
-        setBlocks(prev => prev + 1);
+    if (!wallet.isConnected) {
+      setPurchases([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const r = await fetch(`${API}/purchases?buyer_address=${wallet.address}`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        if (!cancelled) setPurchases(Array.isArray(data) ? data : []);
+      } catch (e) {
+        if (!cancelled) setPurchases([]);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-    }, 100);
+    })();
+    return () => { cancelled = true; };
+  }, [wallet.isConnected, wallet.address]);
 
-    return () => clearInterval(interval);
-  }, [isMining, selectedPlan]);
+  // 1-second tick — drives every real-time stat in the UI
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
 
-  const formatTime = (seconds: number) => {
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
+  // Aggregate: earnings + hashrate + uptime per purchase, summed
+  const stats = useMemo(() => {
+    const now = Date.now();
+    let totalEarned = 0;
+    let totalHashrate = 0;
+    let activeCount = 0;
+    let oldestStart = null;
+    const perPlan = [];
+
+    for (const p of purchases) {
+      const meta = PLAN_META[String(p.plan_id)];
+      if (!meta) continue;
+      const startedAt = p.created_at ? new Date(p.created_at).getTime() : now;
+      const elapsedSec = Math.max(0, (now - startedAt) / 1000);
+      const contractSec = meta.contractDays * 86400;
+      const activeSec = Math.min(elapsedSec, contractSec);
+      const isActive = elapsedSec < contractSec;
+      // Per-second payout = daily / 86400
+      const earned = (meta.dailyUSD / 86400) * activeSec;
+      totalEarned += earned;
+      if (isActive) {
+        totalHashrate += meta.hashrateHs;
+        activeCount++;
+      }
+      if (!oldestStart || startedAt < oldestStart) oldestStart = startedAt;
+      perPlan.push({
+        ...p,
+        meta,
+        startedAt,
+        elapsedSec,
+        activeSec,
+        contractSec,
+        isActive,
+        earned,
+        progressPct: Math.min(100, (activeSec / contractSec) * 100),
+      });
+    }
+    perPlan.sort((a, b) => b.startedAt - a.startedAt);
+    const sessionUptimeSec = oldestStart ? (now - oldestStart) / 1000 : 0;
+    return { totalEarned, totalHashrate, activeCount, perPlan, sessionUptimeSec };
+  }, [purchases, tick]);
+
+  // Synthetic "blocks found" — tied to total hashrate × elapsed seconds for stability
+  const blocksFound = useMemo(() => {
+    if (!stats.sessionUptimeSec) return 0;
+    return Math.floor((stats.totalHashrate * stats.sessionUptimeSec) / 600000);
+  }, [stats.totalHashrate, stats.sessionUptimeSec]);
+
+  if (!wallet.isConnected) {
+    return (
+      <section className="pt-24 pb-20 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-3xl mx-auto text-center">
+          <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-500 shadow-lg shadow-orange-500/30 mb-6">
+            <Wallet className="w-10 h-10 text-white" />
+          </div>
+          <h1 className="text-3xl sm:text-4xl font-bold mb-3">Your Mining Dashboard</h1>
+          <p className="text-slate-400 mb-8 leading-relaxed">
+            Connect your wallet to view your active mining plans, real-time earnings, and on-chain purchase history. Your wallet address is your identity — earnings accrue automatically based on the time elapsed since each plan was activated.
+          </p>
+          <div className="flex justify-center" data-testid="dashboard-connect-cta">
+            <ConnectWalletButton />
+          </div>
+          <div className="mt-12 grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {[
+              { icon: Cpu, label: "Real-time hashrate", desc: "Aggregated across all your active rigs" },
+              { icon: Wallet, label: "Live earnings", desc: "$ accrues every second since plan activation" },
+              { icon: Activity, label: "Plan history", desc: "Every purchase tied to your wallet address" },
+            ].map((c) => (
+              <div key={c.label} className="bg-slate-900/60 border border-slate-800 rounded-xl p-5 text-left">
+                <c.icon className="w-5 h-5 text-orange-400 mb-2" />
+                <div className="text-sm font-semibold mb-1">{c.label}</div>
+                <div className="text-xs text-slate-500">{c.desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (loading) {
+    return (
+      <section className="pt-24 pb-20 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto flex items-center justify-center py-20 text-slate-400">
+          <Loader2 className="w-5 h-5 mr-2 animate-spin" /> Loading your dashboard…
+        </div>
+      </section>
+    );
+  }
+
+  const hasPlans = stats.perPlan.length > 0;
+  const earliestPlan = stats.perPlan[stats.perPlan.length - 1];
 
   return (
-    <section className="pt-24 pb-20 px-4 sm:px-6 lg:px-8">
+    <section className="pt-24 pb-20 px-4 sm:px-6 lg:px-8" data-testid="mining-dashboard">
       <div className="max-w-7xl mx-auto">
-        <div className="mb-8">
-          <h1 className="text-3xl sm:text-4xl font-bold mb-2">Mining Dashboard</h1>
-          <p className="text-slate-400">Real-time monitoring of your XMR mining operation</p>
+        <div className="mb-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+          <div>
+            <h1 className="text-3xl sm:text-4xl font-bold mb-2">Mining Dashboard</h1>
+            <p className="text-slate-400">
+              Real-time earnings for <span className="font-mono text-orange-400">{shortAddress(wallet.address)}</span>
+            </p>
+          </div>
+          <ConnectWalletButton compact />
         </div>
 
+        {/* Status banner */}
         <div className={`mb-8 p-4 rounded-xl border flex items-center justify-between ${
-          isMining 
-            ? "bg-green-500/10 border-green-500/30" 
+          stats.activeCount > 0
+            ? "bg-green-500/10 border-green-500/30"
             : "bg-amber-500/10 border-amber-500/30"
         }`}>
           <div className="flex items-center gap-3">
-            <div className={`w-3 h-3 rounded-full ${isMining ? "bg-green-500 animate-pulse" : "bg-amber-500"}`}></div>
-            <span className="font-medium">{isMining ? "Mining Active" : "Ready to Start Mining"}</span>
-            <span className="text-sm text-slate-400">| Plan: {selectedPlan.name}</span>
+            <div className={`w-3 h-3 rounded-full ${stats.activeCount > 0 ? "bg-green-500 animate-pulse" : "bg-amber-500"}`}></div>
+            <span className="font-medium" data-testid="dashboard-status">
+              {stats.activeCount > 0 ? `Mining Active · ${stats.activeCount} plan${stats.activeCount === 1 ? "" : "s"}` : "No active plans"}
+            </span>
+            {hasPlans && (
+              <span className="text-sm text-slate-400 hidden sm:inline">
+                | Earning since {timeAgo(earliestPlan.startedAt)}
+              </span>
+            )}
           </div>
-          <Button 
-            onClick={() => setIsMining(!isMining)}
-            className={isMining ? "bg-red-500 hover:bg-red-600" : "bg-green-500 hover:bg-green-600"}
-          >
-            {isMining ? "Stop Mining" : "Start Mining"}
-          </Button>
+          {!hasPlans && (
+            <Button
+              onClick={() => { window.location.hash = "#plans"; }}
+              data-testid="dashboard-go-plans"
+              className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600"
+            >
+              <ShoppingBag className="w-4 h-4 mr-2" /> Buy a plan
+            </Button>
+          )}
         </div>
 
+        {/* KPI strip */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <Card className="bg-slate-900 border-slate-800">
             <CardContent className="pt-6">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-slate-500 text-sm">Current Hashrate</span>
+                <span className="text-slate-500 text-sm">Total Hashrate</span>
                 <Cpu className="w-5 h-5 text-orange-400" />
               </div>
-              <div className="text-3xl font-bold text-orange-400">{hashrate.toLocaleString()}</div>
-              <div className="text-sm text-slate-500">H/s</div>
+              <div className="text-3xl font-bold text-orange-400 tabular-nums" data-testid="kpi-hashrate">
+                {stats.totalHashrate.toLocaleString()}
+              </div>
+              <div className="text-sm text-slate-500">H/s · across {stats.activeCount} active rig{stats.activeCount === 1 ? "" : "s"}</div>
             </CardContent>
           </Card>
 
           <Card className="bg-slate-900 border-slate-800">
             <CardContent className="pt-6">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-slate-500 text-sm">USDT Earned</span>
+                <span className="text-slate-500 text-sm">Total Earned</span>
                 <Wallet className="w-5 h-5 text-green-400" />
               </div>
-              <div className="text-3xl font-bold text-green-400">${usdtEarned.toFixed(4)}</div>
-              <div className="text-sm text-slate-500">Total earnings</div>
+              <div className="text-3xl font-bold text-green-400 tabular-nums" data-testid="kpi-earned">
+                {fmtUSDFine(stats.totalEarned)}
+              </div>
+              <div className="text-sm text-slate-500">USDT · live every second</div>
             </CardContent>
           </Card>
 
           <Card className="bg-slate-900 border-slate-800">
             <CardContent className="pt-6">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-slate-500 text-sm">Uptime</span>
+                <span className="text-slate-500 text-sm">Mining Time</span>
                 <Activity className="w-5 h-5 text-blue-400" />
               </div>
-              <div className="text-3xl font-bold text-blue-400 tabular-nums" data-testid="uptime-value">{formatTime(timeElapsed)}</div>
-              <div className="text-sm text-slate-500">This session</div>
+              <div className="text-3xl font-bold text-blue-400 tabular-nums" data-testid="kpi-uptime">
+                {formatDuration(stats.sessionUptimeSec)}
+              </div>
+              <div className="text-sm text-slate-500">Since first plan</div>
             </CardContent>
           </Card>
 
           <Card className="bg-slate-900 border-slate-800">
             <CardContent className="pt-6">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-slate-500 text-sm">Blocks Found</span>
+                <span className="text-slate-500 text-sm">Blocks Contributed</span>
                 <Pickaxe className="w-5 h-5 text-amber-400" />
               </div>
-              <div className="text-3xl font-bold text-amber-400">{blocks}</div>
-              <div className="text-sm text-slate-500">This session</div>
+              <div className="text-3xl font-bold text-amber-400 tabular-nums" data-testid="kpi-blocks">
+                {blocksFound.toLocaleString()}
+              </div>
+              <div className="text-sm text-slate-500">Pool shares</div>
             </CardContent>
           </Card>
         </div>
+
+        {/* Active plans list */}
+        {hasPlans && (
+          <Card className="mb-6 bg-slate-900 border-slate-800" data-testid="active-plans-card">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Zap className="w-5 h-5 text-orange-400" />
+                Your Active Plans · {stats.perPlan.length}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {stats.perPlan.map((p) => (
+                <div
+                  key={p.id || p.tx_hash}
+                  className="rounded-xl border border-slate-800 bg-slate-950/60 p-4 hover:border-orange-500/40 transition-colors"
+                  data-testid={`active-plan-${p.id || p.tx_hash}`}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-white">{p.meta.name}</span>
+                        {p.isActive ? (
+                          <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 border border-green-500/30">
+                            Active
+                          </span>
+                        ) : (
+                          <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-800 text-slate-500 border border-slate-700">
+                            Completed
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-slate-500 mt-1">
+                        Started {timeAgo(p.startedAt)} · {p.meta.hashrateHs.toLocaleString()} H/s · {p.meta.annualROIPct}% annual
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-lg font-bold text-green-400 tabular-nums" data-testid={`plan-earned-${p.plan_id}`}>
+                        {fmtUSDFine(p.earned)}
+                      </div>
+                      <div className="text-[10px] uppercase tracking-wider text-slate-500">earned so far</div>
+                    </div>
+                  </div>
+                  {/* Progress */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-500">Contract progress</span>
+                      <span className="text-slate-400">
+                        {Math.floor(p.activeSec / 86400)}d / {p.meta.contractDays}d ({p.progressPct.toFixed(2)}%)
+                      </span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-orange-500 to-amber-500 transition-[width] duration-500"
+                        style={{ width: `${p.progressPct}%` }}
+                      />
+                    </div>
+                  </div>
+                  {/* TX hash row */}
+                  {p.tx_hash && (
+                    <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-500">
+                      <span className="font-mono">tx: {p.tx_hash.slice(0, 10)}…{p.tx_hash.slice(-8)}</span>
+                      <a
+                        href={explorerTxUrl(p.chain, p.tx_hash)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-orange-400 hover:text-orange-300"
+                      >
+                        <ExternalLink className="w-3 h-3" /> view
+                      </a>
+                      <span className="text-slate-600">·</span>
+                      <span className="text-slate-400">{p.amount} {p.token_type}</span>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Real-time XMR Price Chart */}
         <div className="mb-6">
@@ -170,7 +363,7 @@ export function MiningDashboard({ planId }: MiningDashboardProps) {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <MiningLogs running={isMining} />
+              <MiningLogs running={stats.activeCount > 0} />
             </CardContent>
           </Card>
 
@@ -182,42 +375,18 @@ export function MiningDashboard({ planId }: MiningDashboardProps) {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {isMining ? (
+              <div className="space-y-3">
+                {stats.activeCount > 0 ? (
                   <>
-                    <div className="flex items-center gap-3 p-3 bg-slate-950 rounded-lg">
-                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                      <div className="flex-1">
-                        <div className="text-sm font-medium">Share Accepted</div>
-                        <div className="text-xs text-slate-500">2 seconds ago</div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3 p-3 bg-slate-950 rounded-lg">
-                      <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                      <div className="flex-1">
-                        <div className="text-sm font-medium">Hash Submitted</div>
-                        <div className="text-xs text-slate-500">5 seconds ago</div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3 p-3 bg-slate-950 rounded-lg">
-                      <div className="w-2 h-2 bg-amber-500 rounded-full"></div>
-                      <div className="flex-1">
-                        <div className="text-sm font-medium">Difficulty Updated</div>
-                        <div className="text-xs text-slate-500">1 minute ago</div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3 p-3 bg-slate-950 rounded-lg">
-                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                      <div className="flex-1">
-                        <div className="text-sm font-medium">Share Accepted</div>
-                        <div className="text-xs text-slate-500">1 minute ago</div>
-                      </div>
-                    </div>
+                    <ActivityRow color="green" label="Share Accepted" detail={`${(tick * 47) % 9000 + 1000} H validated`} />
+                    <ActivityRow color="blue"  label="Hash Submitted" detail="pool.monerorig.com:5555" />
+                    <ActivityRow color="amber" label="Difficulty Updated" detail="312.4K → 318.9K" />
+                    <ActivityRow color="green" label="Share Accepted" detail={`${(tick * 31) % 9000 + 1000} H validated`} />
                   </>
                 ) : (
                   <div className="text-center py-8 text-slate-500">
-                    <p>No recent activity</p>
-                    <p className="text-sm">Start mining to see live updates</p>
+                    <p>No active mining</p>
+                    <p className="text-sm">Activate a plan to start earning</p>
                   </div>
                 )}
               </div>
@@ -225,38 +394,57 @@ export function MiningDashboard({ planId }: MiningDashboardProps) {
           </Card>
         </div>
 
-        <Card className="mt-6 bg-slate-900 border-slate-800">
-          <CardContent className="pt-6">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div>
-                <h3 className="text-lg font-semibold mb-1">Projected Earnings</h3>
-                <p className="text-slate-500 text-sm">Based on current network difficulty</p>
-              </div>
-              <div className="flex items-center gap-8">
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-orange-400">${selectedPlan.dailyEarnings.toFixed(2)}</div>
-                  <div className="text-xs text-slate-500">Daily</div>
+        {/* Projected earnings summary */}
+        {hasPlans && (
+          <Card className="mt-6 bg-slate-900 border-slate-800">
+            <CardContent className="pt-6">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-semibold mb-1">Projected Earnings</h3>
+                  <p className="text-slate-500 text-sm">Aggregated across all your active plans</p>
                 </div>
-                <ArrowRight className="w-5 h-5 text-slate-600" />
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-amber-400">${(selectedPlan.dailyEarnings * 30).toFixed(2)}</div>
-                  <div className="text-xs text-slate-500">Monthly</div>
-                </div>
-                <ArrowRight className="w-5 h-5 text-slate-600" />
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-green-400">${(selectedPlan.dailyEarnings * 365).toFixed(2)}</div>
-                  <div className="text-xs text-slate-500">Yearly</div>
+                <div className="flex items-center gap-8">
+                  <ProjStat amount={stats.perPlan.filter(p => p.isActive).reduce((s, p) => s + p.meta.dailyUSD, 0)} label="Daily" color="text-orange-400" />
+                  <ArrowRight className="w-5 h-5 text-slate-600" />
+                  <ProjStat amount={stats.perPlan.filter(p => p.isActive).reduce((s, p) => s + p.meta.dailyUSD, 0) * 30} label="Monthly" color="text-amber-400" />
+                  <ArrowRight className="w-5 h-5 text-slate-600" />
+                  <ProjStat amount={stats.perPlan.filter(p => p.isActive).reduce((s, p) => s + p.meta.dailyUSD, 0) * 365} label="Yearly" color="text-green-400" />
                 </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
 
-        {/* Pool Workers */}
         <div className="mt-6">
           <WorkerPool />
         </div>
       </div>
     </section>
+  );
+}
+
+function ActivityRow({ color, label, detail }) {
+  const dot = {
+    green: "bg-green-500",
+    blue:  "bg-blue-500",
+    amber: "bg-amber-500",
+  }[color] || "bg-slate-500";
+  return (
+    <div className="flex items-center gap-3 p-3 bg-slate-950 rounded-lg">
+      <div className={`w-2 h-2 ${dot} rounded-full`} />
+      <div className="flex-1">
+        <div className="text-sm font-medium">{label}</div>
+        <div className="text-xs text-slate-500">{detail}</div>
+      </div>
+    </div>
+  );
+}
+
+function ProjStat({ amount, label, color }) {
+  return (
+    <div className="text-center">
+      <div className={`text-2xl font-bold tabular-nums ${color}`}>{fmtUSD(amount)}</div>
+      <div className="text-xs text-slate-500">{label}</div>
+    </div>
   );
 }
