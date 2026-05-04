@@ -132,6 +132,7 @@ class PurchaseCreate(BaseModel):
     tx_hash: str = Field(pattern=r"^0x[a-fA-F0-9]{64}$")
     token_type: Literal["USDT", "USDC", "NATIVE"]
     billing_mode: Literal["standard", "annual"] = "standard"
+    referrer_address: Optional[str] = Field(default=None, pattern=r"^0x[a-fA-F0-9]{40}$")
 
 
 class Purchase(BaseModel):
@@ -146,6 +147,7 @@ class Purchase(BaseModel):
     tx_hash: str
     token_type: str
     billing_mode: str = "standard"
+    referrer_address: Optional[str] = None
     status: str = "pending"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -154,11 +156,16 @@ class Purchase(BaseModel):
 async def create_purchase(payload: PurchaseCreate):
     data = payload.model_dump()
     data['buyer_address'] = data['buyer_address'].lower()
+    if data.get('referrer_address'):
+        data['referrer_address'] = data['referrer_address'].lower()
+        # Don't allow self-referral
+        if data['referrer_address'] == data['buyer_address']:
+            data['referrer_address'] = None
     obj = Purchase(**data)
     doc = obj.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
     await db.purchases.insert_one(doc)
-    logger.info("Purchase recorded id=%s tx=%s plan=%s", obj.id, obj.tx_hash, obj.plan_id)
+    logger.info("Purchase recorded id=%s tx=%s plan=%s ref=%s", obj.id, obj.tx_hash, obj.plan_id, obj.referrer_address)
     return obj
 
 
@@ -266,6 +273,129 @@ async def get_wallet_activity(address: str):
         sessions=[WalletSession(**s) for s in sessions_raw],
         purchases=[Purchase(**p) for p in purchases_raw],
     )
+
+
+# ---- Referrals: aggregate downline of a wallet ----
+class ReferredUser(BaseModel):
+    address: str
+    plan_id: str
+    plan_name: Optional[str] = None
+    amount: str
+    token_type: str
+    created_at: datetime
+
+
+class ReferralSummary(BaseModel):
+    address: str
+    direct_count: int
+    direct_solo_rigs: int
+    network_value_usd: float
+    network_solo_rigs_total: int
+    referred_users: List[ReferredUser]
+    legs: List[List[ReferredUser]]  # 3 legs (sorted by referred user count desc)
+
+
+# Solo Rig (Plan 2) is the qualifying SKU for the leadership program.
+SOLO_RIG_PLAN_ID = "2"
+SOLO_RIG_USD = 2500
+
+
+def _is_stable(p):
+    return p.get('token_type') in ("USDT", "USDC")
+
+
+def _amount_to_usd(p) -> float:
+    if not _is_stable(p):
+        return 0.0
+    try:
+        return float(p.get('amount', 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+@api_router.get("/wallet/{address}/referrals", response_model=ReferralSummary)
+async def get_wallet_referrals(address: str):
+    addr = address.lower()
+    if not (addr.startswith("0x") and len(addr) == 42):
+        raise HTTPException(status_code=400, detail="Invalid wallet address")
+
+    # Direct referrals: every purchase where referrer_address == addr
+    direct_purchases = await db.purchases.find(
+        {"referrer_address": addr},
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(2000)
+
+    direct_users_map = {}  # buyer_address -> first/best ReferredUser
+    direct_solo_rigs = 0
+    network_value_usd = 0.0
+    network_solo_rigs_total = 0
+
+    # Track referred wallets so we can build legs (one leg per direct referee)
+    leg_aggregates = {}  # direct_addr -> { 'count': int, 'solo': int, 'users': [ReferredUser] }
+
+    for p in direct_purchases:
+        buyer = p.get('buyer_address')
+        if not buyer:
+            continue
+        if isinstance(p.get('created_at'), str):
+            try:
+                p['created_at'] = datetime.fromisoformat(p['created_at'])
+            except Exception:
+                p['created_at'] = datetime.now(timezone.utc)
+        usd = _amount_to_usd(p)
+        network_value_usd += usd
+        is_solo = (p.get('plan_id') == SOLO_RIG_PLAN_ID)
+        if is_solo:
+            direct_solo_rigs += 1
+            network_solo_rigs_total += 1
+        # Keep one entry per direct buyer for the headline list
+        if buyer not in direct_users_map:
+            direct_users_map[buyer] = ReferredUser(
+                address=buyer,
+                plan_id=p.get('plan_id', ''),
+                plan_name=p.get('plan_name'),
+                amount=p.get('amount', '0'),
+                token_type=p.get('token_type', 'USDT'),
+                created_at=p['created_at'],
+            )
+        leg = leg_aggregates.setdefault(buyer, {'count': 0, 'solo': 0, 'users': []})
+        leg['count'] += 1
+        if is_solo:
+            leg['solo'] += 1
+        leg['users'].append(direct_users_map[buyer])
+
+    direct_users = list(direct_users_map.values())
+    direct_users.sort(key=lambda u: u.created_at, reverse=True)
+
+    # Build the 3-2-2 legs: top 3 direct referees by their network value
+    sorted_legs = sorted(leg_aggregates.items(), key=lambda kv: kv[1]['count'], reverse=True)
+    legs_out: List[List[ReferredUser]] = []
+    for i in range(3):
+        if i < len(sorted_legs):
+            users = sorted_legs[i][1]['users']
+            # Deduplicate by address
+            seen = set()
+            uniq = []
+            for u in users:
+                if u.address in seen:
+                    continue
+                seen.add(u.address)
+                uniq.append(u)
+            legs_out.append(uniq)
+        else:
+            legs_out.append([])
+
+    return ReferralSummary(
+        address=addr,
+        direct_count=len(direct_users),
+        direct_solo_rigs=direct_solo_rigs,
+        network_value_usd=round(network_value_usd, 2),
+        network_solo_rigs_total=network_solo_rigs_total,
+        referred_users=direct_users,
+        legs=legs_out,
+    )
+
+
 
 
 # ---- Activity events (page views, clicks, custom events tied to wallet) ----

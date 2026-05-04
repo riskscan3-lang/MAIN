@@ -18,6 +18,7 @@ export function Header({ activeView, setActiveView }: HeaderProps) {
   const baseNavItems = [
     { id: "home", label: "Home" },
     { id: "dashboard", label: "Dashboard" },
+    { id: "rewards", label: "Rewards" },
     { id: "about", label: "About Us" },
     { id: "faq", label: "FAQ" },
     { id: "contact", label: "Contact" },

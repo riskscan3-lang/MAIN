@@ -84,6 +84,14 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
       }
       setTxHash(hash);
       try {
+        const referrer = (() => {
+          try {
+            const r = localStorage.getItem("monerorig.referrer");
+            return r && /^0x[a-fA-F0-9]{40}$/.test(r) && r.toLowerCase() !== wallet.address?.toLowerCase()
+              ? r
+              : null;
+          } catch (_) { return null; }
+        })();
         await fetch(`${API}/purchases`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -95,6 +103,7 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
             chain: chainId,
             tx_hash: hash,
             token_type: tokenType,
+            ...(referrer ? { referrer_address: referrer } : {}),
           }),
         });
       } catch (e) { console.warn("Backend record failed", e); }

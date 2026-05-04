@@ -5,6 +5,7 @@ import { Hero } from "./components/Hero";
 import { Plans } from "./components/Plans";
 import { ProfitCalculator } from "./components/ProfitCalculator";
 import { MiningDashboard } from "./components/MiningDashboard";
+import { Rewards } from "./components/Rewards";
 import { Stats } from "./components/Stats";
 import { Footer } from "./components/Footer";
 import { AboutUs } from "./components/AboutUs";
@@ -28,6 +29,22 @@ function AppShell() {
   // Sync wallet → analytics + auto-track page_view on view change
   useEffect(() => { setTrackingWallet(wallet.address); }, [wallet.address]);
   useEffect(() => { trackEvent("page_view", activeView); }, [activeView]);
+
+  // Capture ?ref=0x… on mount and persist for purchases (referrer attribution)
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const ref = (params.get("ref") || "").trim();
+      if (/^0x[a-fA-F0-9]{40}$/.test(ref)) {
+        localStorage.setItem("monerorig.referrer", ref.toLowerCase());
+        trackEvent("referral_click", "home", { referrer: ref.toLowerCase() });
+        // Clean the URL so the referrer doesn't stick on every share
+        const url = new URL(window.location.href);
+        url.searchParams.delete("ref");
+        window.history.replaceState({}, document.title, url.toString());
+      }
+    } catch (_) {}
+  }, []);
 
   // The first time the wallet connects in this tab, take the user straight to
   // their dashboard so they immediately see their plans + earnings.
@@ -68,6 +85,8 @@ function AppShell() {
         );
       case "dashboard":
         return <MiningDashboard planId={selectedPlan} />;
+      case "rewards":
+        return <Rewards setActiveView={setActiveView} />;
       case "about":
         return <AboutUs setActiveView={setActiveView} />;
       case "faq":
