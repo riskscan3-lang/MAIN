@@ -44,6 +44,35 @@ User uploaded a `src/`-only React + TypeScript + Tailwind + shadcn project (XMRM
 - ✅ Backend `purchases` model accepts `billing_mode: Literal["standard","annual"]` and persists it (verified via curl).
 - ✅ `BuyPlanModal` receives `billingMode` prop and multiplies price 10× for annual.
 
+## What's been implemented (2026-02-04 — current session)
+- ✅ **Admin Panel wired**: `AdminPanel.tsx` mounted in `App.tsx` and gated by `REACT_APP_ADMIN_WALLETS` env. Header shows "Admin" nav link only when connected wallet matches an allowed admin address. Component uses `X-Admin-Wallet` header to call `GET /api/admin/withdrawals` and `PATCH /api/admin/withdrawals/{id}` with status filters (pending/processing/completed/rejected) and inline mark-processing/mark-paid/reject actions.
+- ✅ **Backend admin hardening**: 
+  - `?status=` query is validated against the Literal set (returns 422 on bad value).
+  - `PATCH /api/admin/withdrawals/{id}` now requires `payout_tx_hash` when transitioning to `completed` (returns 400 otherwise).
+- ✅ **User-side withdrawal status notifications**: `MiningDashboard` polls `/api/wallet/{addr}/withdrawals` every 30s, diffs against last-seen statuses, and fires Sonner toasts when an admin flips a request to `processing` (info), `completed` (success), or `rejected` (error). Initial snapshot is seeded so users don't get spurious toasts on first load.
+- ✅ Backend regression: 18/18 pytest cases pass in `/app/backend/tests/test_admin_withdrawals.py` (auth enforcement, full state machine, regression on xmr/price, referrals, purchases).
+- ⚠️ **NOT IMPLEMENTED — Email notifications on status change**: Toast in dashboard is live, but actual email send requires a Resend / SendGrid integration which the user hasn't provided yet. A `notification_subscriptions` collection exists with subscriber emails — wiring an email transport is a future task (Resend recommended).
+
+## Prioritized backlog (P0/P1/P2) — updated
+- **P1**: Replace placeholder receiving address in `/app/frontend/.env` (`REACT_APP_RECIPIENT_ADDRESS`) with real business wallet.
+- **P1**: Transaction-confirmation polling: flip `status` `pending → confirmed/failed` via Etherscan/PolygonScan/BscScan.
+- **P1**: Email transport for withdrawal completion (Resend or SendGrid). When an admin marks a withdrawal `completed`, look up subscribers in `notification_subscriptions` and email them the payout tx hash.
+- **P2**: State-machine enforcement on PATCH /api/admin/withdrawals (currently any → any allowed; consider pending→processing→completed only).
+- **P2**: Add unique index on `purchases.tx_hash` to prevent duplicate inserts.
+- **P2**: Pipe terminal mining logs into "Recent Activity" UI cards.
+- **P2**: SIWE (Sign-In With Ethereum) for cryptographic wallet auth.
+- **P2**: Real referrer/affiliate codes (currently derived from wallet address).
+- **P2**: Replace simulated MiningDashboard with real-data feed (pool API).
+- **P2**: Refactor `App.tsx` conditional `activeView` routing into React Router as nav surface grows.
+- **P2**: Refactor `server.py` (911 lines) — split admin + withdrawals into separate router modules.
+- **P3**: WalletConnect / Coinbase Wallet support fully wired.
+- **P3**: i18n (multi-language).
+
+## Next tasks
+- Confirm real receiving wallet in `.env`.
+- Decide on email provider (Resend recommended) and wire status-change emails.
+- User to verify Admin Panel flow end-to-end on the preview URL with a connected admin MetaMask.
+
 ## Prioritized backlog (P0/P1/P2)
 - **P1**: Replace placeholder receiving address (`0x000...dEaD`) in `/app/frontend/.env` (`REACT_APP_RECIPIENT_ADDRESS`) with real business wallet.
 - **P1**: Transaction-confirmation polling: flip `status` `pending → confirmed/failed` via Etherscan/PolygonScan/BscScan.

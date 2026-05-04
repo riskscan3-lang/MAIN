@@ -846,7 +846,7 @@ async def list_wallet_withdrawals(address: str):
 # ---- Admin: withdrawal management ----
 @api_router.get("/admin/withdrawals", response_model=List[Withdrawal])
 async def admin_list_withdrawals(
-    status: Optional[str] = None,
+    status: Optional[Literal["pending", "processing", "completed", "rejected"]] = None,
     x_admin_wallet: Optional[str] = Header(default=None, alias="X-Admin-Wallet"),
 ):
     _require_admin(x_admin_wallet)
@@ -867,6 +867,13 @@ async def admin_update_withdrawal(
     existing = await db.withdrawals.find_one({"id": withdrawal_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Withdrawal not found")
+
+    # Require payout tx hash when marking a withdrawal completed — completed
+    # without a tx hash is meaningless from an audit / user-trust perspective.
+    if payload.status == "completed":
+        tx = (payload.payout_tx_hash or existing.get("payout_tx_hash") or "").strip()
+        if not tx:
+            raise HTTPException(status_code=400, detail="payout_tx_hash is required to mark a withdrawal completed")
 
     update = {"status": payload.status}
     if payload.payout_tx_hash is not None:
