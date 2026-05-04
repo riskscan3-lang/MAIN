@@ -140,21 +140,46 @@ export function WalletProvider({ children }) {
     });
   }, []);
 
-  // Eagerly check existing injected connections (e.g. user previously connected MetaMask)
+  // Eagerly check existing injected connections AND restore prior WalletConnect sessions
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!injected) return;
+      // 1. Injected (MetaMask etc) — check eth_accounts
+      if (injected) {
+        try {
+          const accounts = await injected.request({ method: "eth_accounts" });
+          if (cancelled) return;
+          if (accounts?.length) {
+            const cid = await injected.request({ method: "eth_chainId" });
+            setProvider(injected);
+            setAddress(accounts[0]);
+            setChainId(parseInt(cid, 16));
+            attachProviderListeners(injected);
+            recordSession(accounts[0], "injected", parseInt(cid, 16));
+            return;
+          }
+        } catch (_) {}
+      }
+      // 2. WalletConnect v2 — restore active session from local storage
       try {
-        const accounts = await injected.request({ method: "eth_accounts" });
+        const wc = await getWCProvider();
         if (cancelled) return;
-        if (accounts?.length) {
-          const cid = await injected.request({ method: "eth_chainId" });
-          setProvider(injected);
-          setAddress(accounts[0]);
-          setChainId(parseInt(cid, 16));
-          attachProviderListeners(injected);
-          recordSession(accounts[0], "injected", parseInt(cid, 16));
+        // EthereumProvider auto-restores its own session; we just need to read state
+        if (wc.accounts?.length || wc.session) {
+          let addr = wc.accounts?.[0] || null;
+          if (!addr) {
+            try {
+              const accs = await wc.request({ method: "eth_accounts" });
+              addr = accs?.[0] || null;
+            } catch (_) {}
+          }
+          if (addr) {
+            attachProviderListeners(wc);
+            setProvider(wc);
+            setAddress(addr);
+            setChainId(wc.chainId || null);
+            recordSession(addr, "walletconnect", wc.chainId || null);
+          }
         }
       } catch (_) {}
     })();
@@ -175,13 +200,48 @@ export function WalletProvider({ children }) {
 
   const connectWalletConnect = useCallback(async () => {
     const wc = await getWCProvider();
+    // Listen for the URI event so we can show a clearer error if user closes the modal
+    let modalClosed = false;
+    const onModalClose = () => { modalClosed = true; };
+    if (typeof wc.on === "function") wc.on("display_uri", () => {});
+    if (wc.modal && typeof wc.modal.subscribeModal === "function") {
+      wc.modal.subscribeModal((state) => {
+        if (state && state.open === false) onModalClose();
+      });
+    }
+
     await wc.connect();
+
+    // After connect resolves, accounts and chainId may take a moment to populate.
+    // Try several strategies in order of reliability.
+    let addr = wc.accounts?.[0] || null;
+    if (!addr && wc.session?.namespaces?.eip155?.accounts?.length) {
+      const caip = wc.session.namespaces.eip155.accounts[0]; // "eip155:1:0xabc..."
+      addr = caip.split(":").pop() || null;
+    }
+    if (!addr) {
+      try {
+        const accs = await wc.request({ method: "eth_accounts" });
+        addr = accs?.[0] || null;
+      } catch (_) {}
+    }
+    if (!addr) {
+      throw new Error(modalClosed ? "Connection cancelled" : "Could not read wallet accounts after connect");
+    }
+
+    let cid = wc.chainId || null;
+    if (!cid) {
+      try {
+        const chainHex = await wc.request({ method: "eth_chainId" });
+        cid = chainHex ? parseInt(chainHex, 16) : null;
+      } catch (_) {}
+    }
+
     attachProviderListeners(wc);
     setProvider(wc);
-    const addr = wc.accounts?.[0] || null;
     setAddress(addr);
-    setChainId(wc.chainId || null);
-    if (addr) recordSession(addr, "walletconnect", wc.chainId || null);
+    setChainId(cid);
+    recordSession(addr, "walletconnect", cid);
   }, [attachProviderListeners, recordSession]);
 
   /** Open chooser: if injected exists, prefer it; else WalletConnect */

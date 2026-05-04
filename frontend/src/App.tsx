@@ -29,6 +29,20 @@ function AppShell() {
   useEffect(() => { setTrackingWallet(wallet.address); }, [wallet.address]);
   useEffect(() => { trackEvent("page_view", activeView); }, [activeView]);
 
+  // The first time the wallet connects in this tab, take the user straight to
+  // their dashboard so they immediately see their plans + earnings.
+  const prevAddressRef = useState({ current: null })[0];
+  useEffect(() => {
+    if (wallet.address && !prevAddressRef.current) {
+      prevAddressRef.current = wallet.address;
+      // Avoid navigating if user is already deep in a flow (e.g. checkout modal open)
+      if (!buyPlanId && (activeView === "home" || activeView === "plans")) {
+        setActiveView("dashboard");
+      }
+    }
+    if (!wallet.address) prevAddressRef.current = null;
+  }, [wallet.address]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handlePlanSelect = (planId) => {
     trackEvent("plan_buy_click", "plans", { plan_id: planId });
     setSelectedPlan(planId);
