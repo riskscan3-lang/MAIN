@@ -679,6 +679,146 @@ async def get_xmr_ohlc(days: int = 1):
     _xmr_ohlc_cache[days] = {"fetched_at": datetime.now(timezone.utc), "data": fallback}
     return fallback
 
+
+
+# ---- XMR live price (cached) ----
+_xmr_price_cache = {"price": None, "fetched_at": None}
+_XMR_PRICE_TTL = 60  # seconds
+
+
+@api_router.get("/xmr/price")
+async def get_xmr_price():
+    """Return current XMR/USD price. Cached for 60s. Falls back to last good value on failure."""
+    now = datetime.now(timezone.utc)
+    cached = _xmr_price_cache.get("price")
+    cached_at = _xmr_price_cache.get("fetched_at")
+    if cached is not None and cached_at and (now - cached_at).total_seconds() < _XMR_PRICE_TTL:
+        return {"price_usd": cached, "source": "cache", "fetched_at": cached_at.isoformat()}
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as client:
+            r = await client.get(
+                "https://api.coingecko.com/api/v3/simple/price",
+                params={"ids": "monero", "vs_currencies": "usd"},
+                headers={"User-Agent": "MoneroRig/1.0"},
+            )
+        if r.status_code == 200:
+            data = r.json()
+            price = float(data.get("monero", {}).get("usd") or 0)
+            if price > 0:
+                _xmr_price_cache["price"] = price
+                _xmr_price_cache["fetched_at"] = now
+                return {"price_usd": price, "source": "coingecko", "fetched_at": now.isoformat()}
+    except Exception as e:
+        logger.warning("CoinGecko XMR price fetch failed: %s", e)
+    # Fallback to last good value or a sensible default
+    if cached is not None:
+        return {"price_usd": cached, "source": "stale", "fetched_at": cached_at.isoformat()}
+    return {"price_usd": 165.0, "source": "fallback", "fetched_at": now.isoformat()}
+
+
+# ---- Withdrawals ----
+class WithdrawalCreate(BaseModel):
+    wallet_address: str = Field(pattern=r"^0x[a-fA-F0-9]{40}$")
+    amount_usd: float = Field(gt=0)
+    available_usd: float = Field(ge=0)  # client's reported total earned
+    xmr_address: Optional[str] = Field(default=None, max_length=128)
+    contact_email: Optional[EmailStr] = None
+
+
+class Withdrawal(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    wallet_address: str
+    amount_usd: float
+    amount_xmr: Optional[float] = None
+    xmr_address: Optional[str] = None
+    contact_email: Optional[str] = None
+    status: Literal["pending", "processing", "completed", "rejected"] = "pending"
+    admin_notified: bool = False
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    processed_at: Optional[datetime] = None
+
+
+WITHDRAWAL_MIN_USD = 10.0
+
+
+async def _notify_admin_telegram(text: str) -> bool:
+    """Best-effort Telegram notification. No-op if env vars missing."""
+    bot = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat = os.environ.get("TELEGRAM_CHAT_ID")
+    if not bot or not chat:
+        logger.info("Telegram admin notify skipped (env not configured)")
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            r = await client.post(
+                f"https://api.telegram.org/bot{bot}/sendMessage",
+                json={"chat_id": chat, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
+            )
+        return r.status_code == 200
+    except Exception as e:
+        logger.warning("Telegram notify failed: %s", e)
+        return False
+
+
+@api_router.post("/withdrawals", response_model=Withdrawal)
+async def create_withdrawal(payload: WithdrawalCreate):
+    if payload.amount_usd < WITHDRAWAL_MIN_USD:
+        raise HTTPException(status_code=400, detail=f"Minimum withdrawal is ${WITHDRAWAL_MIN_USD:.0f} USDT")
+    addr = payload.wallet_address.lower()
+    # Ensure user already has at least one purchase
+    has_plan = await db.purchases.count_documents({"buyer_address": addr})
+    if not has_plan:
+        raise HTTPException(status_code=400, detail="No active plan found for this wallet")
+    # Reject if there is already a pending withdrawal
+    pending = await db.withdrawals.find_one({"wallet_address": addr, "status": {"$in": ["pending", "processing"]}}, {"_id": 0})
+    if pending:
+        raise HTTPException(status_code=409, detail="A withdrawal is already in progress for this wallet")
+
+    # Compute XMR equivalent
+    xmr_price = _xmr_price_cache.get("price") or 165.0
+    amount_xmr = round(payload.amount_usd / xmr_price, 6) if xmr_price else None
+
+    obj = Withdrawal(
+        wallet_address=addr,
+        amount_usd=round(payload.amount_usd, 4),
+        amount_xmr=amount_xmr,
+        xmr_address=payload.xmr_address,
+        contact_email=payload.contact_email.lower() if payload.contact_email else None,
+    )
+    doc = obj.model_dump()
+    doc["created_at"] = doc["created_at"].isoformat()
+    if doc.get("processed_at"):
+        doc["processed_at"] = doc["processed_at"].isoformat()
+    await db.withdrawals.insert_one(doc)
+
+    # Notify admin (best-effort, do not block client on failure)
+    msg = (
+        f"💰 <b>New Withdrawal Request</b>\n"
+        f"Wallet: <code>{addr}</code>\n"
+        f"Amount: <b>${obj.amount_usd:.4f}</b> USDT (~ {amount_xmr} XMR)\n"
+        f"XMR address: <code>{obj.xmr_address or '—'}</code>\n"
+        f"Contact: {obj.contact_email or '—'}\n"
+        f"Request ID: <code>{obj.id}</code>"
+    )
+    notified = await _notify_admin_telegram(msg)
+    if notified:
+        await db.withdrawals.update_one({"id": obj.id}, {"$set": {"admin_notified": True}})
+        obj.admin_notified = True
+    logger.info("Withdrawal request id=%s wallet=%s amount=$%.2f notified=%s", obj.id, addr, obj.amount_usd, notified)
+    return obj
+
+
+@api_router.get("/wallet/{address}/withdrawals", response_model=List[Withdrawal])
+async def list_wallet_withdrawals(address: str):
+    addr = address.lower()
+    if not (addr.startswith("0x") and len(addr) == 42):
+        raise HTTPException(status_code=400, detail="Invalid wallet address")
+    docs = await db.withdrawals.find({"wallet_address": addr}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return [Withdrawal(**d) for d in docs]
+
+
 # Include the router in the main app
 app.include_router(api_router)
 

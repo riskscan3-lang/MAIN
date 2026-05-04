@@ -1,8 +1,9 @@
 // @ts-nocheck
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
-import { Pickaxe, Clock, Wallet, Activity, Cpu, Zap, ArrowRight, Loader2, ShoppingBag, ExternalLink, Users, Gift } from "lucide-react";
+import { Pickaxe, Clock, Wallet, Activity, Cpu, Zap, ArrowRight, Loader2, ShoppingBag, ExternalLink, Users, Gift, Banknote, X, AlertTriangle, CheckCircle2, Clock3 } from "lucide-react";
 import { XmrPriceChart } from "./XmrPriceChart";
 import { WorkerPool } from "./WorkerPool";
 import { MiningLogs } from "./MiningLogs";
@@ -11,6 +12,8 @@ import { useWallet, explorerTxUrl, shortAddress } from "../context/WalletContext
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
+
+const WITHDRAWAL_MIN_USD = 10;
 
 // Plan catalogue (must mirror /components/Plans.tsx + /components/ProfitCalculator.tsx)
 const PLAN_META = {
@@ -22,6 +25,7 @@ const PLAN_META = {
 
 const fmtUSD = (n) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtUSDFine = (n) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`;
+const fmtXMR = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 6, maximumFractionDigits: 6 });
 
 function formatDuration(seconds) {
   const s = Math.max(0, Math.floor(seconds));
@@ -52,31 +56,35 @@ export function MiningDashboard({ planId, setActiveView }: MiningDashboardProps)
   const wallet = useWallet();
   const [purchases, setPurchases] = useState([]);
   const [referralsData, setReferralsData] = useState(null);
+  const [xmrPrice, setXmrPrice] = useState(null); // USD per 1 XMR
+  const [withdrawals, setWithdrawals] = useState([]);
+  const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [tick, setTick] = useState(0); // re-render every 1s
 
-  // Fetch purchases + referrals when wallet connects / changes
+  // Fetch purchases + referrals + withdrawals when wallet connects / changes
   useEffect(() => {
     if (!wallet.isConnected) {
       setPurchases([]);
       setReferralsData(null);
+      setWithdrawals([]);
       return;
     }
     let cancelled = false;
     (async () => {
       setLoading(true);
       try {
-        const [pRes, rRes] = await Promise.all([
+        const [pRes, rRes, wRes] = await Promise.all([
           fetch(`${API}/purchases?buyer_address=${wallet.address}`),
           fetch(`${API}/wallet/${wallet.address}/referrals`),
+          fetch(`${API}/wallet/${wallet.address}/withdrawals`),
         ]);
         if (!cancelled && pRes.ok) {
           const data = await pRes.json();
           setPurchases(Array.isArray(data) ? data : []);
         }
-        if (!cancelled && rRes.ok) {
-          setReferralsData(await rRes.json());
-        }
+        if (!cancelled && rRes.ok) setReferralsData(await rRes.json());
+        if (!cancelled && wRes.ok) setWithdrawals(await wRes.json());
       } catch (e) {
         // ignore
       } finally {
@@ -85,6 +93,31 @@ export function MiningDashboard({ planId, setActiveView }: MiningDashboardProps)
     })();
     return () => { cancelled = true; };
   }, [wallet.isConnected, wallet.address]);
+
+  // Fetch XMR price (refresh every 60s)
+  useEffect(() => {
+    let cancelled = false;
+    const fetchPrice = async () => {
+      try {
+        const r = await fetch(`${API}/xmr/price`);
+        if (r.ok) {
+          const d = await r.json();
+          if (!cancelled && d.price_usd > 0) setXmrPrice(d.price_usd);
+        }
+      } catch (_) {}
+    };
+    fetchPrice();
+    const id = setInterval(fetchPrice, 60000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
+  const refreshWithdrawals = async () => {
+    if (!wallet.address) return;
+    try {
+      const r = await fetch(`${API}/wallet/${wallet.address}/withdrawals`);
+      if (r.ok) setWithdrawals(await r.json());
+    } catch (_) {}
+  };
 
   // 1-second tick — drives every real-time stat in the UI
   useEffect(() => {
@@ -139,6 +172,18 @@ export function MiningDashboard({ planId, setActiveView }: MiningDashboardProps)
     if (!stats.sessionUptimeSec) return 0;
     return Math.floor((stats.totalHashrate * stats.sessionUptimeSec) / 600000);
   }, [stats.totalHashrate, stats.sessionUptimeSec]);
+
+  // Withdrawable balance = total earned − sum of pending/processing/completed withdrawals
+  const withdrawn = useMemo(() => {
+    return withdrawals
+      .filter((w) => ["pending", "processing", "completed"].includes(w.status))
+      .reduce((s, w) => s + (w.amount_usd || 0), 0);
+  }, [withdrawals]);
+  const withdrawable = Math.max(0, stats.totalEarned - withdrawn);
+  const withdrawableXMR = xmrPrice ? withdrawable / xmrPrice : 0;
+  const totalEarnedXMR = xmrPrice ? stats.totalEarned / xmrPrice : 0;
+  const hasPendingWithdrawal = withdrawals.some((w) => ["pending", "processing"].includes(w.status));
+  const canWithdraw = withdrawable >= WITHDRAWAL_MIN_USD && !hasPendingWithdrawal;
 
   if (!wallet.isConnected) {
     return (
@@ -247,10 +292,14 @@ export function MiningDashboard({ planId, setActiveView }: MiningDashboardProps)
                 <span className="text-slate-500 text-sm">Total Earned</span>
                 <Wallet className="w-5 h-5 text-green-400" />
               </div>
-              <div className="text-3xl font-bold text-green-400 tabular-nums" data-testid="kpi-earned">
-                {fmtUSDFine(stats.totalEarned)}
+              <div className="text-2xl sm:text-3xl font-bold text-green-400 tabular-nums" data-testid="kpi-earned">
+                {fmtUSDFine(stats.totalEarned)} <span className="text-slate-500 text-base font-normal">~</span>{" "}
+                <span className="text-orange-300 text-base font-semibold">{xmrPrice ? fmtXMR(totalEarnedXMR) : "—"}</span>
+                <span className="text-slate-500 text-xs font-normal ml-1">XMR</span>
               </div>
-              <div className="text-sm text-slate-500">USDT · live every second</div>
+              <div className="text-sm text-slate-500">
+                {xmrPrice ? `Live · 1 XMR = $${xmrPrice.toFixed(2)}` : "Loading XMR price…"}
+              </div>
             </CardContent>
           </Card>
 
@@ -281,7 +330,84 @@ export function MiningDashboard({ planId, setActiveView }: MiningDashboardProps)
           </Card>
         </div>
 
-        {/* Active plans list */}
+        {/* Withdrawable Balance + Request Withdraw */}
+        <Card className="mb-8 border-orange-500/30 bg-gradient-to-br from-orange-500/10 via-amber-500/5 to-transparent" data-testid="withdrawable-card">
+          <CardContent className="p-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+              <div className="md:col-span-2">
+                <div className="flex items-center gap-2 text-orange-300 text-xs uppercase tracking-wider font-semibold mb-2">
+                  <Banknote className="w-4 h-4" />
+                  Withdrawable Balance
+                </div>
+                <div className="text-3xl sm:text-4xl font-bold text-white tabular-nums" data-testid="withdrawable-usd">
+                  {fmtUSDFine(withdrawable)}
+                  <span className="text-slate-500 text-base font-normal mx-2">~</span>
+                  <span className="text-orange-300 text-xl font-semibold" data-testid="withdrawable-xmr">
+                    {xmrPrice ? fmtXMR(withdrawableXMR) : "—"}
+                  </span>
+                  <span className="text-slate-500 text-sm font-normal ml-1">XMR</span>
+                </div>
+                <div className="text-sm text-slate-400 mt-2 flex items-center gap-2">
+                  <Clock3 className="w-3.5 h-3.5 text-amber-400" />
+                  Withdrawals process within <strong className="text-amber-300">24 hours</strong> · available <strong className="text-amber-300">24/7</strong>
+                </div>
+                {withdrawn > 0 && (
+                  <div className="text-xs text-slate-500 mt-1">
+                    Already requested: {fmtUSD(withdrawn)} · Total earned: {fmtUSD(stats.totalEarned)}
+                  </div>
+                )}
+                {hasPendingWithdrawal && (
+                  <div className="text-xs text-amber-400 mt-2 inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-amber-500/10 border border-amber-500/30">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    A withdrawal is currently being processed
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <Button
+                  onClick={() => setShowWithdrawModal(true)}
+                  disabled={!canWithdraw}
+                  data-testid="request-withdrawal-button"
+                  className={`py-6 font-semibold text-base ${
+                    canWithdraw
+                      ? "bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 shadow-lg shadow-orange-500/30"
+                      : "bg-slate-800 text-slate-500 cursor-not-allowed"
+                  }`}
+                >
+                  <Banknote className="w-4 h-4 mr-2" />
+                  Request Withdrawal
+                </Button>
+                {!canWithdraw && !hasPendingWithdrawal && (
+                  <p className="text-[11px] text-slate-500 text-center">
+                    Min. ${WITHDRAWAL_MIN_USD} USDT required (~ {xmrPrice ? fmtXMR(WITHDRAWAL_MIN_USD / xmrPrice) : "—"} XMR)
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Withdrawal history */}
+            {withdrawals.length > 0 && (
+              <div className="mt-5 pt-5 border-t border-orange-500/20">
+                <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-3">Recent Withdrawals</div>
+                <div className="space-y-2">
+                  {withdrawals.slice(0, 5).map((w) => (
+                    <div key={w.id} className="flex items-center justify-between gap-3 text-sm bg-slate-950/40 rounded-lg px-3 py-2 border border-slate-800" data-testid={`withdrawal-${w.id}`}>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <WithdrawalStatusBadge status={w.status} />
+                        <span className="text-slate-400 truncate">{new Date(w.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                      </div>
+                      <div className="text-white font-medium tabular-nums whitespace-nowrap">
+                        ${w.amount_usd.toFixed(4)}
+                        {w.amount_xmr ? <span className="text-slate-500 font-normal"> · {w.amount_xmr.toFixed(6)} XMR</span> : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
         {hasPlans && (
           <Card className="mb-6 bg-slate-900 border-slate-800" data-testid="active-plans-card">
             <CardHeader>
@@ -432,6 +558,16 @@ export function MiningDashboard({ planId, setActiveView }: MiningDashboardProps)
           <WorkerPool />
         </div>
       </div>
+
+      <WithdrawModal
+        open={showWithdrawModal}
+        onClose={() => setShowWithdrawModal(false)}
+        withdrawable={withdrawable}
+        withdrawableXMR={withdrawableXMR}
+        xmrPrice={xmrPrice}
+        walletAddress={wallet.address}
+        onSubmitted={refreshWithdrawals}
+      />
     </section>
   );
 }
@@ -558,6 +694,199 @@ function RefStat({ label, value, accent }) {
     <div className="text-center bg-slate-950/60 border border-slate-800 rounded-xl px-3 py-3">
       <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">{label}</div>
       <div className={`text-lg font-bold tabular-nums ${accent ? "text-green-400" : "text-white"}`}>{value}</div>
+    </div>
+  );
+}
+
+function WithdrawalStatusBadge({ status }) {
+  const map = {
+    pending:    { label: "Pending",    cls: "bg-amber-500/15 text-amber-400 border-amber-500/30",  icon: Clock3 },
+    processing: { label: "Processing", cls: "bg-blue-500/15 text-blue-400 border-blue-500/30",      icon: Loader2 },
+    completed:  { label: "Paid",       cls: "bg-green-500/15 text-green-400 border-green-500/30",   icon: CheckCircle2 },
+    rejected:   { label: "Rejected",   cls: "bg-red-500/15 text-red-400 border-red-500/30",         icon: AlertTriangle },
+  }[status] || { label: status, cls: "bg-slate-800 text-slate-400 border-slate-700", icon: Clock3 };
+  const Icon = map.icon;
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border ${map.cls}`}>
+      <Icon className={`w-3 h-3 ${status === "processing" ? "animate-spin" : ""}`} />
+      {map.label}
+    </span>
+  );
+}
+
+function WithdrawModal({ open, onClose, withdrawable, withdrawableXMR, xmrPrice, walletAddress, onSubmitted }) {
+  const [amount, setAmount] = useState("");
+  const [xmrAddress, setXmrAddress] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (open) {
+      setAmount(String(Math.floor(withdrawable * 100) / 100));
+      setXmrAddress("");
+      setContactEmail("");
+      setError(null);
+    }
+  }, [open, withdrawable]);
+
+  if (!open) return null;
+
+  const amtNum = parseFloat(amount || "0");
+  const amtXMR = xmrPrice && amtNum > 0 ? amtNum / xmrPrice : 0;
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    if (!amtNum || amtNum < WITHDRAWAL_MIN_USD) { setError(`Minimum withdrawal is $${WITHDRAWAL_MIN_USD} USDT`); return; }
+    if (amtNum > withdrawable + 0.001) { setError("Amount exceeds your withdrawable balance"); return; }
+    if (!xmrAddress || xmrAddress.length < 30) { setError("Enter a valid XMR receiving address"); return; }
+
+    setSubmitting(true);
+    try {
+      const r = await fetch(`${API}/withdrawals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          wallet_address: walletAddress,
+          amount_usd: amtNum,
+          available_usd: withdrawable,
+          xmr_address: xmrAddress,
+          contact_email: contactEmail || undefined,
+        }),
+      });
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        throw new Error(body?.detail?.[0]?.msg || body?.detail || "Withdrawal request failed");
+      }
+      toast.success("Withdrawal requested", {
+        description: "Our team has been notified. Funds arrive within 24 hours.",
+        duration: 7000,
+      });
+      onSubmitted();
+      onClose();
+    } catch (err) {
+      setError(err?.message || "Failed to submit withdrawal");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+      onClick={onClose}
+      data-testid="withdraw-modal"
+    >
+      <div
+        className="relative w-full max-w-md bg-gradient-to-br from-slate-900 to-slate-950 border border-orange-500/30 rounded-2xl shadow-2xl overflow-hidden max-h-[92vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-6 py-5 border-b border-slate-800 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-amber-500 flex items-center justify-center">
+              <Banknote className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold">Request Withdrawal</h3>
+              <p className="text-xs text-slate-400">Paid in XMR · 24-hour processing window</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-slate-500 hover:text-white" data-testid="withdraw-modal-close">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs flex items-start gap-2">
+            <Clock3 className="w-3.5 h-3.5 mt-0.5 text-amber-400 flex-shrink-0" />
+            <span className="text-amber-200">
+              Withdrawals are processed manually within <strong>24 hours</strong>. Our team is on call <strong>24/7</strong>.
+              You'll receive your funds at the XMR address you provide below.
+            </span>
+          </div>
+
+          <div>
+            <label className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold flex items-center justify-between mb-1.5">
+              <span>Amount (USDT)</span>
+              <span className="text-orange-300">Available: ${withdrawable.toFixed(4)}</span>
+            </label>
+            <div className="relative">
+              <input
+                type="number"
+                step="0.0001"
+                min={WITHDRAWAL_MIN_USD}
+                max={withdrawable}
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                data-testid="withdraw-amount-input"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500/60 pr-16"
+                autoComplete="off"
+              />
+              <button
+                type="button"
+                onClick={() => setAmount(String(Math.floor(withdrawable * 10000) / 10000))}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] uppercase tracking-wider px-2 py-1 rounded-md bg-orange-500/15 text-orange-300 hover:bg-orange-500/25"
+              >
+                MAX
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              You receive: <span className="text-orange-300 font-semibold tabular-nums">{xmrPrice ? amtXMR.toFixed(6) : "—"} XMR</span>
+              {xmrPrice && <span className="text-slate-600"> @ ${xmrPrice.toFixed(2)}/XMR</span>}
+            </p>
+          </div>
+
+          <div>
+            <label className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5 block">XMR receiving address</label>
+            <input
+              type="text"
+              value={xmrAddress}
+              onChange={(e) => setXmrAddress(e.target.value.trim())}
+              placeholder="4..."
+              data-testid="withdraw-xmr-input"
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 font-mono text-xs text-white focus:outline-none focus:border-orange-500/60"
+              autoComplete="off"
+            />
+            <p className="text-[11px] text-slate-600 mt-1">Use your personal Monero wallet address (starts with 4 or 8). We never share or store this beyond payout.</p>
+          </div>
+
+          <div>
+            <label className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5 block">Contact email (optional)</label>
+            <input
+              type="email"
+              value={contactEmail}
+              onChange={(e) => setContactEmail(e.target.value.trim())}
+              placeholder="you@email.com"
+              data-testid="withdraw-email-input"
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-orange-500/60"
+              autoComplete="email"
+            />
+          </div>
+
+          {error && (
+            <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <Button
+            type="submit"
+            disabled={submitting}
+            data-testid="withdraw-submit"
+            className="w-full bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 py-6 font-bold text-base disabled:opacity-50"
+          >
+            {submitting
+              ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Submitting…</>
+              : <>Submit Withdrawal Request</>}
+          </Button>
+
+          <p className="text-[11px] text-slate-600 text-center">
+            By submitting, you agree to wait up to 24 hours for processing. Our team will notify you upon completion.
+          </p>
+        </form>
+      </div>
     </div>
   );
 }
