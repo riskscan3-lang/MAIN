@@ -6,6 +6,7 @@ import { Plans } from "./components/Plans";
 import { ProfitCalculator } from "./components/ProfitCalculator";
 import { MiningDashboard } from "./components/MiningDashboard";
 import { Rewards } from "./components/Rewards";
+import { Toaster } from "./components/ui/sonner";
 import { Stats } from "./components/Stats";
 import { Footer } from "./components/Footer";
 import { AboutUs } from "./components/AboutUs";
@@ -84,7 +85,7 @@ function AppShell() {
           </>
         );
       case "dashboard":
-        return <MiningDashboard planId={selectedPlan} />;
+        return <MiningDashboard planId={selectedPlan} setActiveView={setActiveView} />;
       case "rewards":
         return <Rewards setActiveView={setActiveView} />;
       case "about":
@@ -126,6 +127,14 @@ function AppShell() {
       </main>
       <Footer setActiveView={setActiveView} />
       <LiveChat />
+      <Toaster
+        position="bottom-right"
+        toastOptions={{
+          classNames: {
+            toast: "bg-slate-900 border border-orange-500/40 text-white",
+          },
+        }}
+      />
       {buyPlanId !== null && (
         <BuyPlanModal
           planId={buyPlanId}

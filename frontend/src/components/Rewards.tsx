@@ -1,9 +1,10 @@
 // @ts-nocheck
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import {
   Gift, Users, Trophy, Plane, Pickaxe, Crown, Infinity as InfinityIcon,
   Copy, Check, Twitter, Send as SendIcon, Wallet, Loader2, Lock, Sparkles,
-  CheckCircle2, ChevronRight,
+  CheckCircle2, ChevronRight, Mail, Bell,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
@@ -84,6 +85,7 @@ export function Rewards({ setActiveView }: RewardsProps) {
   const networkSoloRigs = referralsData?.network_solo_rigs_total ?? 0;
   const legs = referralsData?.legs ?? [[], [], []];
   const legCounts = legs.map((l) => l?.length ?? 0);
+  const referredUsers = referralsData?.referred_users ?? [];
 
   // Tier 1: 1 Direct Referral $250 USDT
   const tier1Pct = Math.min(100, (directSolo >= 1 ? 1 : 0) * 100);
@@ -100,6 +102,36 @@ export function Rewards({ setActiveView }: RewardsProps) {
   const passivePct = Math.min(100, (networkSoloRigs / PASSIVE_INFINITY_GOAL_RIGS) * 100);
   // Tier 5: Grand Master (500 rigs)
   const grandPct = Math.min(100, (networkSoloRigs / GRAND_MASTER_GOAL_RIGS) * 100);
+
+  // Detect newly-unlocked tiers and show celebratory toasts
+  useEffect(() => {
+    if (!wallet.address || !referralsData) return;
+    const tiers = [
+      { id: "t1", unlocked: directSolo >= 1, title: "🎉 $250 USDT Reward Unlocked", body: "Your first Solo Rig referral just earned you $250 USDT instant reward." },
+      { id: "t2", unlocked: directSolo >= 3, title: "🌍 $500 + Russia Tour Unlocked", body: "3 Solo Rig referrals — claim your $500 cash plus a Russia mining-setup tour." },
+      { id: "t3", unlocked: has322 && networkValue >= NETWORK_3_2_2_GOAL_USD, title: "⛏️ FREE RIG Unlocked!", body: "Your 3-2-2 network is complete and you've crossed $25K — a free $2,500 Rig is on the way." },
+      { id: "t4", unlocked: networkSoloRigs >= PASSIVE_INFINITY_GOAL_RIGS, title: "♾️ Passive Infinity Unlocked", body: "You're now earning 1 free rig every single day. Welcome to the top of the leaderboard." },
+      { id: "t5", unlocked: networkSoloRigs >= GRAND_MASTER_GOAL_RIGS, title: "👑 Grand Master Bonus Unlocked", body: "$125,000 USDT cash reward unlocked. Our team will reach out to coordinate the payout." },
+    ];
+    let seen;
+    try {
+      const raw = localStorage.getItem(`monerorig.tiers.${wallet.address.toLowerCase()}`);
+      seen = raw ? new Set(JSON.parse(raw)) : new Set();
+    } catch (_) { seen = new Set(); }
+    const newSeen = new Set(seen);
+    for (const t of tiers) {
+      if (t.unlocked && !seen.has(t.id)) {
+        toast.success(t.title, { description: t.body, duration: 7000 });
+        newSeen.add(t.id);
+      } else if (!t.unlocked && seen.has(t.id)) {
+        // (rare) un-unlocked — keep storage in sync
+        newSeen.delete(t.id);
+      }
+    }
+    try {
+      localStorage.setItem(`monerorig.tiers.${wallet.address.toLowerCase()}`, JSON.stringify([...newSeen]));
+    } catch (_) {}
+  }, [wallet.address, directSolo, has322, networkValue, networkSoloRigs, referralsData]);
 
   /* ----------------------------- GATES ----------------------------- */
 
@@ -229,6 +261,9 @@ export function Rewards({ setActiveView }: RewardsProps) {
             </div>
           </CardContent>
         </Card>
+
+        {/* Email alerts opt-in */}
+        <EmailAlertsCard wallet={wallet} />
 
         {/* ===== Affiliate & Networking Rewards ===== */}
         <Section
@@ -522,5 +557,105 @@ function Stat({ label, value, dotColor, testId }) {
       </div>
       <div className="text-xl font-bold text-white tabular-nums">{value}</div>
     </div>
+  );
+}
+
+function EmailAlertsCard({ wallet }) {
+  const [email, setEmail] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [subscribed, setSubscribed] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Hide if already subscribed in this browser
+  useEffect(() => {
+    try {
+      if (!wallet.address) return;
+      const flag = localStorage.getItem(`monerorig.notif.${wallet.address.toLowerCase()}`);
+      if (flag) setSubscribed(true);
+    } catch (_) {}
+  }, [wallet.address]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError("Please enter a valid email");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const r = await fetch(`${API}/notifications/subscribe`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: wallet.address, email, topics: ["rewards"] }),
+      });
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        throw new Error(body?.detail?.[0]?.msg || body?.detail || "Failed to subscribe");
+      }
+      try {
+        localStorage.setItem(`monerorig.notif.${wallet.address.toLowerCase()}`, email);
+      } catch (_) {}
+      setSubscribed(true);
+      toast.success("You're subscribed!", {
+        description: "We'll email you when a tier unlocks. Manage anytime from this page.",
+      });
+    } catch (err) {
+      setError(err?.message || "Failed to subscribe");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (subscribed) {
+    return (
+      <Card className="border-green-500/40 bg-green-500/5" data-testid="email-alerts-subscribed">
+        <CardContent className="p-4 sm:p-5 flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-green-500/20 border border-green-500/30 flex items-center justify-center flex-shrink-0">
+            <Bell className="w-4 h-4 text-green-400" />
+          </div>
+          <div className="flex-1 text-sm">
+            <span className="font-semibold text-green-400">Email alerts enabled.</span>
+            <span className="text-slate-400"> We'll let you know the moment a tier unlocks.</span>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="border-slate-800 bg-slate-900/60" data-testid="email-alerts-card">
+      <CardContent className="p-4 sm:p-5">
+        <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-orange-500/15 border border-orange-500/30 flex items-center justify-center flex-shrink-0">
+              <Mail className="w-4 h-4 text-orange-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-white">Get notified when a tier unlocks</div>
+              <div className="text-xs text-slate-500">Optional · we'll only email you about reward milestones, never marketing.</div>
+            </div>
+          </div>
+          <input
+            type="email"
+            placeholder="you@email.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            data-testid="email-alerts-input"
+            className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-orange-500/60 sm:w-64"
+            autoComplete="email"
+          />
+          <Button
+            type="submit"
+            disabled={submitting || !email}
+            data-testid="email-alerts-submit"
+            className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 px-5 py-2.5 font-semibold disabled:opacity-50"
+          >
+            {submitting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Saving</> : "Subscribe"}
+          </Button>
+        </form>
+        {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
+      </CardContent>
+    </Card>
   );
 }

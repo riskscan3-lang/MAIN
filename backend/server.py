@@ -396,6 +396,43 @@ async def get_wallet_referrals(address: str):
     )
 
 
+# ---- Notification subscriptions (email alerts for reward unlocks) ----
+class NotificationSubscribeCreate(BaseModel):
+    wallet_address: str = Field(pattern=r"^0x[a-fA-F0-9]{40}$")
+    email: EmailStr
+    topics: List[Literal["rewards", "earnings", "all"]] = ["rewards"]
+
+
+class NotificationSubscribe(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    wallet_address: str
+    email: EmailStr
+    topics: List[str]
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@api_router.post("/notifications/subscribe", response_model=NotificationSubscribe)
+async def notifications_subscribe(payload: NotificationSubscribeCreate):
+    data = payload.model_dump()
+    data["wallet_address"] = data["wallet_address"].lower()
+    data["email"] = data["email"].lower()
+    obj = NotificationSubscribe(**data)
+    doc = obj.model_dump()
+    doc["created_at"] = doc["created_at"].isoformat()
+    # Upsert by wallet+email so re-subscribing doesn't create duplicates
+    await db.notification_subscriptions.update_one(
+        {"wallet_address": doc["wallet_address"], "email": doc["email"]},
+        {"$set": doc},
+        upsert=True,
+    )
+    logger.info("Notification subscription wallet=%s email=%s topics=%s", doc["wallet_address"], doc["email"], doc["topics"])
+    return obj
+
+
+
+
 
 
 # ---- Activity events (page views, clicks, custom events tied to wallet) ----

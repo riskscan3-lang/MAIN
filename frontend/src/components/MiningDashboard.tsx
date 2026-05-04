@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
-import { Pickaxe, Clock, Wallet, Activity, Cpu, Zap, ArrowRight, Loader2, ShoppingBag, ExternalLink } from "lucide-react";
+import { Pickaxe, Clock, Wallet, Activity, Cpu, Zap, ArrowRight, Loader2, ShoppingBag, ExternalLink, Users, Gift } from "lucide-react";
 import { XmrPriceChart } from "./XmrPriceChart";
 import { WorkerPool } from "./WorkerPool";
 import { MiningLogs } from "./MiningLogs";
@@ -45,30 +45,40 @@ function timeAgo(ts) {
 
 interface MiningDashboardProps {
   planId?: number | null;
+  setActiveView?: (view: string) => void;
 }
 
-export function MiningDashboard({ planId }: MiningDashboardProps) {
+export function MiningDashboard({ planId, setActiveView }: MiningDashboardProps) {
   const wallet = useWallet();
   const [purchases, setPurchases] = useState([]);
+  const [referralsData, setReferralsData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [tick, setTick] = useState(0); // re-render every 1s
 
-  // Fetch purchases when wallet connects / changes
+  // Fetch purchases + referrals when wallet connects / changes
   useEffect(() => {
     if (!wallet.isConnected) {
       setPurchases([]);
+      setReferralsData(null);
       return;
     }
     let cancelled = false;
     (async () => {
       setLoading(true);
       try {
-        const r = await fetch(`${API}/purchases?buyer_address=${wallet.address}`);
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const data = await r.json();
-        if (!cancelled) setPurchases(Array.isArray(data) ? data : []);
+        const [pRes, rRes] = await Promise.all([
+          fetch(`${API}/purchases?buyer_address=${wallet.address}`),
+          fetch(`${API}/wallet/${wallet.address}/referrals`),
+        ]);
+        if (!cancelled && pRes.ok) {
+          const data = await pRes.json();
+          setPurchases(Array.isArray(data) ? data : []);
+        }
+        if (!cancelled && rRes.ok) {
+          setReferralsData(await rRes.json());
+        }
       } catch (e) {
-        if (!cancelled) setPurchases([]);
+        // ignore
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -349,6 +359,9 @@ export function MiningDashboard({ planId }: MiningDashboardProps) {
           </Card>
         )}
 
+        {/* Referrals — your direct downline */}
+        <ReferralsCard data={referralsData} onGoRewards={() => setActiveView && setActiveView("rewards")} />
+
         {/* Real-time XMR Price Chart */}
         <div className="mb-6">
           <XmrPriceChart />
@@ -445,6 +458,106 @@ function ProjStat({ amount, label, color }) {
     <div className="text-center">
       <div className={`text-2xl font-bold tabular-nums ${color}`}>{fmtUSD(amount)}</div>
       <div className="text-xs text-slate-500">{label}</div>
+    </div>
+  );
+}
+
+function ReferralsCard({ data, onGoRewards }) {
+  const goRewards = () => { if (onGoRewards) onGoRewards(); };
+  const directCount = data?.direct_count ?? 0;
+  const networkValue = data?.network_value_usd ?? 0;
+  const directSolo = data?.direct_solo_rigs ?? 0;
+  const referredUsers = data?.referred_users ?? [];
+
+  return (
+    <Card className="mb-6 bg-slate-900 border-slate-800" data-testid="dashboard-referrals-card">
+      <CardHeader>
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <CardTitle className="flex items-center gap-2">
+            <Users className="w-5 h-5 text-orange-400" />
+            Your Referrals
+            <span className="text-xs font-normal text-slate-500">· {directCount} direct · {fmtUSD(networkValue)} network</span>
+          </CardTitle>
+          <Button
+            onClick={goRewards}
+            data-testid="dashboard-go-rewards"
+            variant="outline"
+            className="border-orange-500/40 text-orange-300 hover:bg-orange-500/10 hover:border-orange-500/70"
+          >
+            <Gift className="w-4 h-4 mr-2" /> View Rewards
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {referredUsers.length === 0 ? (
+          <div className="text-center py-8 text-slate-500">
+            <Users className="w-8 h-8 mx-auto mb-2 opacity-50" />
+            <p>You haven't referred anyone yet</p>
+            <p className="text-sm">Share your unique referral link from the Rewards page to start earning $250 instant per Solo Rig referral.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm" data-testid="referrals-table">
+              <thead>
+                <tr className="text-left text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-800">
+                  <th className="px-2 py-2.5 font-semibold">Wallet</th>
+                  <th className="px-2 py-2.5 font-semibold">Plan</th>
+                  <th className="px-2 py-2.5 font-semibold">Amount</th>
+                  <th className="px-2 py-2.5 font-semibold">When</th>
+                </tr>
+              </thead>
+              <tbody>
+                {referredUsers.slice(0, 10).map((u) => (
+                  <tr
+                    key={u.address}
+                    className="border-b border-slate-800/60 hover:bg-slate-950/40 transition-colors"
+                    data-testid={`referral-row-${u.address}`}
+                  >
+                    <td className="px-2 py-3">
+                      <span className="font-mono text-xs text-slate-300">
+                        {u.address.slice(0, 6)}…{u.address.slice(-4)}
+                      </span>
+                    </td>
+                    <td className="px-2 py-3">
+                      <span className="text-orange-300 text-sm">{u.plan_name || u.plan_id}</span>
+                      {u.plan_id === "2" && (
+                        <span className="ml-2 inline-flex items-center text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                          Solo Rig
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-2 py-3 text-green-400 font-medium">
+                      {u.amount} {u.token_type}
+                    </td>
+                    <td className="px-2 py-3 text-slate-400">
+                      {new Date(u.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {referredUsers.length > 10 && (
+              <p className="text-xs text-slate-500 text-center mt-3">
+                Showing 10 of {referredUsers.length} · view all on the Rewards page
+              </p>
+            )}
+            <div className="grid grid-cols-3 gap-3 mt-5 pt-5 border-t border-slate-800">
+              <RefStat label="Direct" value={directCount} />
+              <RefStat label="Solo Rigs" value={directSolo} />
+              <RefStat label="Network Value" value={fmtUSD(networkValue)} accent />
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function RefStat({ label, value, accent }) {
+  return (
+    <div className="text-center bg-slate-950/60 border border-slate-800 rounded-xl px-3 py-3">
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">{label}</div>
+      <div className={`text-lg font-bold tabular-nums ${accent ? "text-green-400" : "text-white"}`}>{value}</div>
     </div>
   );
 }
