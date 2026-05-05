@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+import asyncio
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
@@ -30,7 +31,8 @@ logger = logging.getLogger(__name__)
 # Create the main app without a prefix
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
+    # Startup — re-attach verifiers for any purchases left pending across restarts
+    asyncio.create_task(_resume_pending_verifications())
     yield
     # Shutdown
     client.close()
@@ -48,6 +50,39 @@ CHAIN_EXPLORERS = {
     56: "https://bscscan.com",
     137: "https://polygonscan.com",
 }
+
+# Public JSON-RPC endpoints used to verify purchase txs on-chain. Override per
+# chain via env (e.g. RPC_URL_1, RPC_URL_56, RPC_URL_137) for higher rate limits
+# or paid providers in production.
+RPC_URLS = {
+    1:   os.environ.get("RPC_URL_1",   "https://eth.llamarpc.com"),
+    56:  os.environ.get("RPC_URL_56",  "https://bsc-dataseed.binance.org"),
+    137: os.environ.get("RPC_URL_137", "https://polygon-rpc.com"),
+}
+
+# Token contracts the frontend can pay with — must match REACT_APP_USDT_*/USDC_*
+# in /app/frontend/.env. Verifying a tx requires checking that the input call
+# went to one of these addresses and decoded as transfer(recipient, amount).
+TOKEN_CONTRACTS = {
+    "USDT": {
+        1:   "0xdac17f958d2ee523a2206206994597c13d831ec7",
+        56:  "0x55d398326f99059ff775485246999027b3197955",
+        137: "0xc2132d05d31c914a87c6611c10748aeb04b58e8f",
+    },
+    "USDC": {
+        1:   "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        56:  "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+        137: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",
+    },
+}
+
+# Decimal places per (token, chain). USDT/USDC = 6 on Ethereum/Polygon, 18 on BSC.
+TOKEN_DECIMALS = {
+    ("USDT", 1):   6,  ("USDT", 137): 6,  ("USDT", 56):  18,
+    ("USDC", 1):   6,  ("USDC", 137): 6,  ("USDC", 56):  18,
+}
+
+ERC20_TRANSFER_SELECTOR = "0xa9059cbb"  # transfer(address,uint256)
 
 
 # Define Models
@@ -156,8 +191,191 @@ class Purchase(BaseModel):
     token_type: str
     billing_mode: str = "standard"
     referrer_address: Optional[str] = None
-    status: str = "pending"
+    status: str = "pending"  # pending | confirmed | failed
+    verified_at: Optional[datetime] = None
+    verification_error: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# How long to keep retrying on-chain verification before giving up. Most txs
+# confirm in <2 min on BSC/Polygon and <3 min on Ethereum at standard gas.
+PURCHASE_VERIFY_DEADLINE_SEC = 30 * 60   # 30 min
+PURCHASE_VERIFY_INTERVAL_SEC = 30        # poll every 30s
+
+
+def _recipient_address() -> Optional[str]:
+    addr = os.environ.get("RECIPIENT_ADDRESS") or os.environ.get("REACT_APP_RECIPIENT_ADDRESS")
+    return addr.lower() if addr else None
+
+
+async def _rpc_call(chain: int, method: str, params: list) -> Optional[dict]:
+    """Issue a JSON-RPC call to the given chain. Returns `result` or None on failure."""
+    url = RPC_URLS.get(chain)
+    if not url:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            r = await client.post(url, json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+        if r.status_code != 200:
+            return None
+        body = r.json()
+        if "error" in body:
+            logger.warning("RPC error chain=%s %s: %s", chain, method, body["error"])
+            return None
+        return body.get("result")
+    except Exception as e:
+        logger.warning("RPC call failed chain=%s %s: %s", chain, method, e)
+        return None
+
+
+def _hex_to_int(h: Optional[str]) -> int:
+    if not h:
+        return 0
+    return int(h, 16)
+
+
+async def _verify_purchase_onchain(purchase: dict) -> tuple[str, Optional[str]]:
+    """Returns (status, error). status ∈ {pending, confirmed, failed}.
+
+    `pending` means tx not yet mined (try again later).
+    `confirmed` means tx mined successfully AND moved expected funds to recipient.
+    `failed` means tx reverted, or the funds didn't reach the recipient at all.
+    """
+    chain = purchase["chain"]
+    tx_hash = purchase["tx_hash"]
+    buyer = purchase["buyer_address"].lower()
+    token_type = purchase["token_type"]
+    recipient = _recipient_address()
+    if not recipient:
+        return ("pending", "RECIPIENT_ADDRESS not configured")
+
+    receipt = await _rpc_call(chain, "eth_getTransactionReceipt", [tx_hash])
+    if not receipt:
+        return ("pending", None)  # not mined yet
+    # Tx mined — was it successful?
+    if receipt.get("status") != "0x1":
+        return ("failed", "transaction reverted on chain")
+
+    tx = await _rpc_call(chain, "eth_getTransactionByHash", [tx_hash])
+    if not tx:
+        return ("failed", "tx receipt found but tx body missing")
+
+    tx_from = (tx.get("from") or "").lower()
+    tx_to = (tx.get("to") or "").lower()
+    if tx_from != buyer:
+        return ("failed", f"tx from {tx_from} doesn't match buyer {buyer}")
+
+    # ----- Native (ETH/BNB/MATIC) -----
+    if token_type == "NATIVE":
+        if tx_to != recipient:
+            return ("failed", f"native tx sent to {tx_to}, expected {recipient}")
+        # value is in wei (18 decimals on all 3 chains)
+        value_wei = _hex_to_int(tx.get("value"))
+        try:
+            expected_native = float(purchase["amount"])
+        except (TypeError, ValueError):
+            return ("failed", "submitted amount not a number")
+        # 18-decimal precision; allow 1% slippage tolerance for gas-token rounding
+        expected_wei = int(expected_native * (10 ** 18) * 0.99)
+        if value_wei < expected_wei:
+            return ("failed", f"value {value_wei} wei < expected {expected_wei} wei")
+        return ("confirmed", None)
+
+    # ----- ERC20 (USDT / USDC) -----
+    expected_token = TOKEN_CONTRACTS.get(token_type, {}).get(chain)
+    if not expected_token:
+        return ("failed", f"no {token_type} contract configured for chain {chain}")
+    if tx_to != expected_token:
+        return ("failed", f"tx target {tx_to} is not the {token_type} contract")
+
+    # Decode `transfer(address,uint256)` from input
+    data = tx.get("input") or "0x"
+    if not data.startswith(ERC20_TRANSFER_SELECTOR) or len(data) < (10 + 64 + 64):
+        return ("failed", "input is not a transfer() call")
+    raw_to = "0x" + data[10:74][-40:]      # last 20 bytes of first arg
+    raw_amount = data[74:138]
+    if raw_to.lower() != recipient:
+        return ("failed", f"transfer recipient {raw_to.lower()} != expected {recipient}")
+    transferred = int(raw_amount, 16)
+    decimals = TOKEN_DECIMALS.get((token_type, chain), 6)
+    try:
+        expected_units = int(float(purchase["amount"]) * (10 ** decimals) * 0.99)  # 1% tolerance
+    except (TypeError, ValueError):
+        return ("failed", "submitted amount not a number")
+    if transferred < expected_units:
+        return ("failed", f"transferred {transferred} < expected {expected_units}")
+    return ("confirmed", None)
+
+
+async def _process_purchase_verification(purchase_id: str):
+    """Background task: verify a single purchase on-chain, retrying until the
+    tx is mined or the deadline expires."""
+    while True:
+        doc = await db.purchases.find_one({"id": purchase_id}, {"_id": 0})
+        if not doc:
+            return
+        if doc.get("status") in ("confirmed", "failed"):
+            return  # already terminal
+
+        # Past deadline? mark as failed.
+        created = doc.get("created_at")
+        if isinstance(created, str):
+            try:
+                created_dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+            except Exception:
+                created_dt = datetime.now(timezone.utc)
+        else:
+            created_dt = created or datetime.now(timezone.utc)
+        if (datetime.now(timezone.utc) - created_dt).total_seconds() > PURCHASE_VERIFY_DEADLINE_SEC:
+            await db.purchases.update_one(
+                {"id": purchase_id},
+                {"$set": {"status": "failed", "verification_error": "verification timed out — tx not mined"}},
+            )
+            await _notify_admin_telegram(
+                f"⚠️ <b>Purchase verification TIMED OUT</b>\nID: <code>{purchase_id}</code>\n"
+                f"Buyer: <code>{doc['buyer_address']}</code>\nTx: <code>{doc['tx_hash']}</code>"
+            )
+            return
+
+        status, err = await _verify_purchase_onchain(doc)
+        if status == "pending":
+            await asyncio.sleep(PURCHASE_VERIFY_INTERVAL_SEC)
+            continue
+        # Terminal state (confirmed or failed) — persist and notify
+        update = {"status": status, "verified_at": datetime.now(timezone.utc).isoformat()}
+        if err:
+            update["verification_error"] = err
+        await db.purchases.update_one({"id": purchase_id}, {"$set": update})
+        chain_label = CHAINS.get(doc["chain"], f"chain {doc['chain']}")
+        if status == "confirmed":
+            msg = (
+                f"✅ <b>Purchase CONFIRMED on-chain</b>\n"
+                f"Plan: <b>{doc.get('plan_name') or doc['plan_id']}</b>\n"
+                f"Amount: <b>{doc['amount']} {doc['token_type']}</b> on {chain_label}\n"
+                f"Buyer: <code>{doc['buyer_address']}</code>\n"
+                f"Tx: <code>{doc['tx_hash']}</code>"
+            )
+        else:
+            msg = (
+                f"❌ <b>Purchase FAILED verification</b>\n"
+                f"Reason: {err}\n"
+                f"Plan: <b>{doc.get('plan_name') or doc['plan_id']}</b>\n"
+                f"Amount claimed: {doc['amount']} {doc['token_type']} on {chain_label}\n"
+                f"Buyer: <code>{doc['buyer_address']}</code>\n"
+                f"Tx: <code>{doc['tx_hash']}</code>"
+            )
+        await _notify_admin_telegram(msg)
+        return
+
+
+async def _resume_pending_verifications():
+    """On startup, re-attach background verifiers for any purchases still pending.
+    Critical so server restarts don't strand purchases in 'pending' forever."""
+    pending = await db.purchases.find({"status": "pending"}, {"_id": 0, "id": 1}).to_list(1000)
+    for p in pending:
+        asyncio.create_task(_process_purchase_verification(p["id"]))
+    if pending:
+        logger.info("Resumed verification for %d pending purchases", len(pending))
 
 
 @api_router.post("/purchases", response_model=Purchase)
@@ -172,15 +390,21 @@ async def create_purchase(payload: PurchaseCreate):
     obj = Purchase(**data)
     doc = obj.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
+    if doc.get('verified_at'):
+        doc['verified_at'] = doc['verified_at'].isoformat()
     await db.purchases.insert_one(doc)
     logger.info("Purchase recorded id=%s tx=%s plan=%s ref=%s", obj.id, obj.tx_hash, obj.plan_id, obj.referrer_address)
 
-    # Telegram: notify admin on every successful purchase
+    # Kick off async on-chain verification. Status stays "pending" until the tx
+    # is mined and validated; the dashboard will only count "confirmed" purchases.
+    asyncio.create_task(_process_purchase_verification(obj.id))
+
+    # Telegram: notify admin a request was placed (will follow up with confirmed/failed)
     chain_label = CHAINS.get(obj.chain, f"chain {obj.chain}")
     explorer = CHAIN_EXPLORERS.get(obj.chain)
     tx_line = f"<a href=\"{explorer}/tx/{obj.tx_hash}\">{obj.tx_hash[:18]}…</a>" if explorer else f"<code>{obj.tx_hash}</code>"
     msg = (
-        f"🛒 <b>New plan purchase</b>\n"
+        f"🛒 <b>New plan purchase (verifying)</b>\n"
         f"Plan: <b>{obj.plan_name or obj.plan_id}</b> ({obj.billing_mode})\n"
         f"Amount: <b>{obj.amount} {obj.token_type}</b> on {chain_label}\n"
         f"Buyer: <code>{obj.buyer_address}</code>\n"
@@ -189,6 +413,25 @@ async def create_purchase(payload: PurchaseCreate):
     )
     await _notify_admin_telegram(msg)
     return obj
+
+
+@api_router.post("/purchases/{purchase_id}/verify", response_model=Purchase)
+async def trigger_purchase_verification(purchase_id: str):
+    """Manual re-verify endpoint — useful for ops debugging or if a user wants
+    to nudge a slow tx."""
+    doc = await db.purchases.find_one({"id": purchase_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+    if doc.get("status") in ("confirmed", "failed"):
+        return Purchase(**doc)
+    status, err = await _verify_purchase_onchain(doc)
+    if status != "pending":
+        update = {"status": status, "verified_at": datetime.now(timezone.utc).isoformat()}
+        if err:
+            update["verification_error"] = err
+        await db.purchases.update_one({"id": purchase_id}, {"$set": update})
+        doc.update(update)
+    return Purchase(**doc)
 
 
 @api_router.get("/purchases", response_model=List[Purchase])

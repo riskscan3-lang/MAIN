@@ -111,6 +111,44 @@ export function MiningDashboard({ planId, setActiveView }: MiningDashboardProps)
     return () => { cancelled = true; clearInterval(id); };
   }, []);
 
+  // Poll purchases every 30s when at least one is still pending verification.
+  // When a purchase flips pending → confirmed, surface a toast so the user
+  // knows their miner just went live; pending → failed shows an error toast.
+  const seenPurchaseStatusRef = useRef({}); // { [purchaseId]: lastStatus }
+  useEffect(() => {
+    // Seed/sync the snapshot on every purchases update so we only fire toasts
+    // for genuine transitions, not initial loads.
+    const seen = seenPurchaseStatusRef.current;
+    const STATUS_COPY = {
+      confirmed: { type: "success", title: "Plan activated!",  body: "Payment confirmed on-chain. Your miner is now live." },
+      failed:    { type: "error",   title: "Plan activation failed", body: "On-chain payment couldn't be verified. Funds were not received." },
+    };
+    for (const p of purchases) {
+      const prev = seen[p.id];
+      if (prev && prev !== p.status && STATUS_COPY[p.status]) {
+        const meta = STATUS_COPY[p.status];
+        const fn = meta.type === "success" ? toast.success : toast.error;
+        fn(meta.title, { description: `${p.plan_name || `Plan ${p.plan_id}`} · ${meta.body}`, duration: 8000 });
+      }
+      seen[p.id] = p.status;
+    }
+  }, [purchases]);
+
+  useEffect(() => {
+    if (!wallet.isConnected || !wallet.address) return;
+    const anyPending = purchases.some((p) => p.status !== "confirmed" && p.status !== "failed");
+    if (!anyPending) return;
+    const id = setInterval(async () => {
+      try {
+        const r = await fetch(`${API}/purchases?buyer_address=${wallet.address}`);
+        if (!r.ok) return;
+        const data = await r.json();
+        if (Array.isArray(data)) setPurchases(data);
+      } catch (_) {}
+    }, 30000);
+    return () => clearInterval(id);
+  }, [wallet.isConnected, wallet.address, purchases]);
+
   const refreshWithdrawals = async () => {
     if (!wallet.address) return;
     try {
@@ -169,7 +207,11 @@ export function MiningDashboard({ planId, setActiveView }: MiningDashboardProps)
     return () => clearInterval(id);
   }, []);
 
-  // Aggregate: earnings + hashrate + uptime per purchase, summed
+  // Aggregate: earnings + hashrate + uptime per purchase, summed.
+  // CRITICAL: only count purchases whose on-chain payment has been verified
+  // (status === "confirmed"). Pending or failed purchases must NOT mine,
+  // otherwise an attacker could broadcast a tx with insufficient balance and
+  // get a free miner before the tx reverts.
   const stats = useMemo(() => {
     const now = Date.now();
     let totalEarned = 0;
@@ -181,7 +223,14 @@ export function MiningDashboard({ planId, setActiveView }: MiningDashboardProps)
     for (const p of purchases) {
       const meta = PLAN_META[String(p.plan_id)];
       if (!meta) continue;
-      const startedAt = p.created_at ? new Date(p.created_at).getTime() : now;
+      // Skip unverified purchases — they're shown separately in a "Pending"
+      // section so the user knows we're waiting for blockchain confirmation.
+      if (p.status !== "confirmed") continue;
+      // Mining starts at the moment of on-chain confirmation, not at the
+      // moment the user broadcast the tx — so we anchor on verified_at when
+      // available, falling back to created_at for older records.
+      const anchorIso = p.verified_at || p.created_at;
+      const startedAt = anchorIso ? new Date(anchorIso).getTime() : now;
       const elapsedSec = Math.max(0, (now - startedAt) / 1000);
       const contractSec = meta.contractDays * 86400;
       const activeSec = Math.min(elapsedSec, contractSec);
@@ -210,6 +259,13 @@ export function MiningDashboard({ planId, setActiveView }: MiningDashboardProps)
     const sessionUptimeSec = oldestStart ? (now - oldestStart) / 1000 : 0;
     return { totalEarned, totalHashrate, activeCount, perPlan, sessionUptimeSec };
   }, [purchases, tick]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Purchases still being verified on-chain (or that failed). Shown in a
+  // separate UI block so users have visibility into where their tx stands.
+  const pendingPurchases = useMemo(
+    () => purchases.filter((p) => p.status !== "confirmed"),
+    [purchases]
+  );
 
   // Synthetic "blocks found" — tied to total hashrate × elapsed seconds for stability
   const blocksFound = useMemo(() => {
@@ -452,6 +508,65 @@ export function MiningDashboard({ planId, setActiveView }: MiningDashboardProps)
             )}
           </CardContent>
         </Card>
+        {pendingPurchases.length > 0 && (
+          <Card className="mb-6 bg-slate-900 border-amber-500/30" data-testid="pending-purchases-card">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-amber-300">
+                <Clock3 className="w-5 h-5" />
+                Awaiting On-Chain Confirmation · {pendingPurchases.length}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-xs text-slate-400 -mt-1">
+                Your miner activates only after we verify your payment on the blockchain. Most transactions confirm within 1–3 minutes.
+              </p>
+              {pendingPurchases.map((p) => {
+                const meta = PLAN_META[String(p.plan_id)];
+                const isFailed = p.status === "failed";
+                return (
+                  <div
+                    key={p.id || p.tx_hash}
+                    className={`rounded-xl border p-4 ${isFailed ? "border-red-500/40 bg-red-500/5" : "border-amber-500/30 bg-amber-500/5"}`}
+                    data-testid={`pending-purchase-${p.id || p.tx_hash}`}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-white">{meta?.name || `Plan ${p.plan_id}`}</span>
+                          {isFailed ? (
+                            <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/40">
+                              Failed
+                            </span>
+                          ) : (
+                            <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1">
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              Verifying
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-slate-400 mt-1">
+                          {p.amount} {p.token_type} · {timeAgo(new Date(p.created_at).getTime())}
+                        </div>
+                        {isFailed && p.verification_error && (
+                          <div className="text-[11px] text-red-300 mt-1.5">⚠ {p.verification_error}</div>
+                        )}
+                      </div>
+                      <a
+                        href={explorerTxUrl(p.chain, p.tx_hash)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 text-xs text-orange-300 hover:text-orange-200"
+                        data-testid={`pending-purchase-tx-${p.id || p.tx_hash}`}
+                      >
+                        View tx <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        )}
         {hasPlans && (
           <Card className="mb-6 bg-slate-900 border-slate-800" data-testid="active-plans-card">
             <CardHeader>
