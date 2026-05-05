@@ -41,6 +41,14 @@ app = FastAPI(lifespan=lifespan)
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
+# Chain metadata — kept in backend so Telegram messages can render nice links
+CHAINS = {1: "Ethereum", 56: "BSC", 137: "Polygon"}
+CHAIN_EXPLORERS = {
+    1: "https://etherscan.io",
+    56: "https://bscscan.com",
+    137: "https://polygonscan.com",
+}
+
 
 # Define Models
 class StatusCheck(BaseModel):
@@ -166,6 +174,20 @@ async def create_purchase(payload: PurchaseCreate):
     doc['created_at'] = doc['created_at'].isoformat()
     await db.purchases.insert_one(doc)
     logger.info("Purchase recorded id=%s tx=%s plan=%s ref=%s", obj.id, obj.tx_hash, obj.plan_id, obj.referrer_address)
+
+    # Telegram: notify admin on every successful purchase
+    chain_label = CHAINS.get(obj.chain, f"chain {obj.chain}")
+    explorer = CHAIN_EXPLORERS.get(obj.chain)
+    tx_line = f"<a href=\"{explorer}/tx/{obj.tx_hash}\">{obj.tx_hash[:18]}…</a>" if explorer else f"<code>{obj.tx_hash}</code>"
+    msg = (
+        f"🛒 <b>New plan purchase</b>\n"
+        f"Plan: <b>{obj.plan_name or obj.plan_id}</b> ({obj.billing_mode})\n"
+        f"Amount: <b>{obj.amount} {obj.token_type}</b> on {chain_label}\n"
+        f"Buyer: <code>{obj.buyer_address}</code>\n"
+        + (f"Referrer: <code>{obj.referrer_address}</code>\n" if obj.referrer_address else "")
+        + f"Tx: {tx_line}"
+    )
+    await _notify_admin_telegram(msg)
     return obj
 
 
@@ -210,6 +232,19 @@ async def record_wallet_session(payload: WalletSessionCreate):
     doc = obj.model_dump()
     doc['connected_at'] = doc['connected_at'].isoformat()
     await db.wallet_sessions.insert_one(doc)
+
+    # Telegram: only ping admin on a wallet's FIRST connect (avoid spam on every
+    # page reload / session rehydration).
+    prior = await db.wallet_sessions.count_documents({"address": obj.address})
+    if prior <= 1:
+        chain_label = CHAINS.get(obj.chain_id, f"chain {obj.chain_id}") if obj.chain_id else "unknown chain"
+        msg = (
+            f"🔌 <b>New wallet connected</b>\n"
+            f"Wallet: <code>{obj.address}</code>\n"
+            f"Source: {obj.source}\n"
+            f"Chain: {chain_label}"
+        )
+        await _notify_admin_telegram(msg)
     return obj
 
 
