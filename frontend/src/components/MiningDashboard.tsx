@@ -209,7 +209,7 @@ export function MiningDashboard({ planId, setActiveView }: MiningDashboardProps)
     perPlan.sort((a, b) => b.startedAt - a.startedAt);
     const sessionUptimeSec = oldestStart ? (now - oldestStart) / 1000 : 0;
     return { totalEarned, totalHashrate, activeCount, perPlan, sessionUptimeSec };
-  }, [purchases, tick]);
+  }, [purchases, tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Synthetic "blocks found" — tied to total hashrate × elapsed seconds for stability
   const blocksFound = useMemo(() => {
