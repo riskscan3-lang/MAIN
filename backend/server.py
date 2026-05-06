@@ -51,13 +51,27 @@ CHAIN_EXPLORERS = {
     137: "https://polygonscan.com",
 }
 
-# Public JSON-RPC endpoints used to verify purchase txs on-chain. Override per
-# chain via env (e.g. RPC_URL_1, RPC_URL_56, RPC_URL_137) for higher rate limits
-# or paid providers in production.
+# Public JSON-RPC endpoints used to verify purchase txs on-chain. We hit
+# multiple endpoints per chain because Railway / cloud egress IPs are often
+# rate-limited or outright blocked by the most popular public RPCs (especially
+# `bsc-dataseed.binance.org`). Override per chain via env (RPC_URL_1 etc) for
+# higher rate limits or paid providers in production.
 RPC_URLS = {
-    1:   os.environ.get("RPC_URL_1",   "https://eth.llamarpc.com"),
-    56:  os.environ.get("RPC_URL_56",  "https://bsc-dataseed.binance.org"),
-    137: os.environ.get("RPC_URL_137", "https://polygon-rpc.com"),
+    1: [
+        os.environ.get("RPC_URL_1", "https://ethereum-rpc.publicnode.com"),
+        "https://eth.llamarpc.com",
+        "https://rpc.ankr.com/eth",
+    ],
+    56: [
+        os.environ.get("RPC_URL_56", "https://bsc-rpc.publicnode.com"),
+        "https://bsc.drpc.org",
+        "https://binance.llamarpc.com",
+    ],
+    137: [
+        os.environ.get("RPC_URL_137", "https://polygon-bor-rpc.publicnode.com"),
+        "https://polygon.drpc.org",
+        "https://polygon.llamarpc.com",
+    ],
 }
 
 # Token contracts the frontend can pay with — must match REACT_APP_USDT_*/USDC_*
@@ -209,23 +223,33 @@ def _recipient_address() -> Optional[str]:
 
 
 async def _rpc_call(chain: int, method: str, params: list) -> Optional[dict]:
-    """Issue a JSON-RPC call to the given chain. Returns `result` or None on failure."""
-    url = RPC_URLS.get(chain)
-    if not url:
-        return None
-    try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            r = await client.post(url, json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
-        if r.status_code != 200:
-            return None
-        body = r.json()
-        if "error" in body:
-            logger.warning("RPC error chain=%s %s: %s", chain, method, body["error"])
-            return None
-        return body.get("result")
-    except Exception as e:
-        logger.warning("RPC call failed chain=%s %s: %s", chain, method, e)
-        return None
+    """Issue a JSON-RPC call to the given chain. Tries each configured endpoint
+    in order, returning the first successful response. Returns None if every
+    endpoint fails (so the caller can treat it as pending and retry later)."""
+    urls = RPC_URLS.get(chain) or []
+    if isinstance(urls, str):
+        urls = [urls]
+    last_err = None
+    for url in urls:
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                r = await client.post(url, json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+            if r.status_code != 200:
+                last_err = f"http {r.status_code}"
+                continue
+            body = r.json()
+            if "error" in body:
+                last_err = f"rpc error: {body['error']}"
+                logger.warning("RPC error chain=%s url=%s %s: %s", chain, url, method, body["error"])
+                continue
+            return body.get("result")
+        except Exception as e:
+            last_err = str(e)
+            logger.warning("RPC call failed chain=%s url=%s %s: %s", chain, url, method, e)
+            continue
+    if last_err:
+        logger.warning("All RPCs failed for chain=%s method=%s: %s", chain, method, last_err)
+    return None
 
 
 def _hex_to_int(h: Optional[str]) -> int:
