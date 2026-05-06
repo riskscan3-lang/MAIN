@@ -312,6 +312,19 @@ export function WalletProvider({ children }) {
   const sendERC20 = useCallback(async ({ chainId: target, tokenType, recipient, amount }) => {
     const token = TOKENS[tokenType]?.[target];
     if (!token?.address) throw new Error(`${tokenType} not configured on chain ${target}`);
+    if (!/^0x[a-fA-F0-9]{40}$/.test(token.address)) {
+      throw new Error(`${tokenType} contract address on chain ${target} is malformed: ${token.address}`);
+    }
+    // Critical guardrail: if the configured token contract equals the recipient
+    // wallet, the wallet would happily send a transfer() call to an EOA. The
+    // tx would succeed on-chain but transfer ZERO funds, leaving the buyer
+    // thinking they paid. Refuse to send.
+    if (recipient && token.address.toLowerCase() === String(recipient).toLowerCase()) {
+      throw new Error(
+        `Configuration error: ${tokenType} on chain ${target} is set to the recipient wallet. ` +
+        `Set REACT_APP_${tokenType}_${target === 56 ? "BSC" : target === 137 ? "POLYGON" : "ETHEREUM"} to the real token contract.`
+      );
+    }
     const wallet = createWalletClient({ chain: VIEM_CHAINS[target], transport: custom(provider) });
     const pub = createPublicClient({ chain: VIEM_CHAINS[target], transport: http(RPC_URLS[target]) });
     const [account] = await wallet.getAddresses();
