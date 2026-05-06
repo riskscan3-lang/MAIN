@@ -1206,6 +1206,62 @@ async def admin_update_withdrawal(
 
 
 # ---- Admin: purchases & wallet sessions ----
+@api_router.get("/admin/debug/verify-trace")
+async def admin_debug_verify_trace(
+    purchase_id: str,
+    x_admin_wallet: Optional[str] = Header(default=None, alias="X-Admin-Wallet"),
+):
+    """Step-by-step trace of the on-chain verification for a single purchase.
+    Returns every intermediate value so we can see exactly where the verifier
+    decides to bail out as 'pending'."""
+    _require_admin(x_admin_wallet)
+    doc = await db.purchases.find_one({"id": purchase_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="purchase not found")
+    trace = {
+        "purchase_id": purchase_id,
+        "tx_hash": doc.get("tx_hash"),
+        "chain": doc.get("chain"),
+        "buyer_address": doc.get("buyer_address"),
+        "token_type": doc.get("token_type"),
+        "amount": doc.get("amount"),
+        "current_status": doc.get("status"),
+    }
+    recipient = _recipient_address()
+    trace["recipient_resolved"] = recipient
+    trace["RECIPIENT_ADDRESS_env"] = os.environ.get("RECIPIENT_ADDRESS")
+    trace["REACT_APP_RECIPIENT_ADDRESS_env"] = os.environ.get("REACT_APP_RECIPIENT_ADDRESS")
+    if not recipient:
+        trace["bailout"] = "recipient_not_configured"
+        return trace
+    receipt = await _rpc_call(doc["chain"], "eth_getTransactionReceipt", [doc["tx_hash"]])
+    trace["receipt_present"] = receipt is not None
+    if receipt is not None:
+        trace["receipt_status"] = receipt.get("status")
+        trace["receipt_to"] = receipt.get("to")
+        trace["receipt_logs_count"] = len(receipt.get("logs") or [])
+    else:
+        trace["bailout"] = "receipt_was_None"
+        return trace
+    if receipt.get("status") != "0x1":
+        trace["bailout"] = "tx_reverted"
+        return trace
+    tx = await _rpc_call(doc["chain"], "eth_getTransactionByHash", [doc["tx_hash"]])
+    trace["tx_body_present"] = tx is not None
+    if tx is None:
+        trace["bailout"] = "tx_body_None"
+        return trace
+    trace["tx_from"] = tx.get("from")
+    trace["tx_to"] = tx.get("to")
+    trace["tx_value"] = tx.get("value")
+    trace["tx_input_prefix"] = (tx.get("input") or "")[:74]
+    # Run the actual verifier and report its outcome
+    status, err = await _verify_purchase_onchain(doc)
+    trace["verifier_status"] = status
+    trace["verifier_error"] = err
+    return trace
+
+
 @api_router.get("/admin/debug/rpc")
 async def admin_debug_rpc(
     chain: int = 56,
