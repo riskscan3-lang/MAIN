@@ -107,6 +107,14 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
           }),
         });
       } catch (e) { console.warn("Backend record failed", e); }
+
+      // Auto-redirect to the dashboard so the user can watch their purchase
+      // get verified on-chain and the miner go live in real time. We give
+      // them a brief 2s pause to grab their referral code if they want it.
+      setTimeout(() => {
+        if (typeof onSuccess === "function") onSuccess();
+        onClose();
+      }, 2000);
     } catch (e) {
       setError(e?.shortMessage || e?.message || "Transaction failed");
     } finally {
@@ -136,7 +144,7 @@ export function BuyPlanModal({ planId, onClose, onSuccess }) {
             </div>
             <div>
               <h3 className="text-lg font-bold">{txHash ? `${plan.name} activated` : `Activate ${plan.name}`}</h3>
-              <p className="text-xs text-slate-400">{txHash ? "Pending confirmation on-chain" : "Pay with crypto · Instant activation"}</p>
+              <p className="text-xs text-slate-400">{txHash ? "Verifying on-chain · Opening dashboard…" : "Pay with crypto · Mining starts after on-chain confirmation"}</p>
             </div>
           </div>
         </div>

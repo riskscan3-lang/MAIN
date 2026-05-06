@@ -1181,6 +1181,100 @@ async def admin_update_withdrawal(
     return Withdrawal(**fresh)
 
 
+# ---- Admin: purchases & wallet sessions ----
+@api_router.get("/admin/purchases", response_model=List[Purchase])
+async def admin_list_purchases(
+    status: Optional[Literal["pending", "confirmed", "failed"]] = None,
+    x_admin_wallet: Optional[str] = Header(default=None, alias="X-Admin-Wallet"),
+):
+    _require_admin(x_admin_wallet)
+    query = {}
+    if status:
+        query["status"] = status
+    docs = await db.purchases.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return [Purchase(**d) for d in docs]
+
+
+@api_router.get("/admin/wallets")
+async def admin_list_wallet_sessions(
+    x_admin_wallet: Optional[str] = Header(default=None, alias="X-Admin-Wallet"),
+):
+    """Return one row per unique wallet address with aggregate session +
+    purchase stats. Used by the admin panel's Wallets tab."""
+    _require_admin(x_admin_wallet)
+
+    # Aggregate sessions: first/last seen, session_count, sources
+    sessions_pipe = [
+        {"$group": {
+            "_id": "$address",
+            "session_count": {"$sum": 1},
+            "first_seen": {"$min": "$connected_at"},
+            "last_seen":  {"$max": "$connected_at"},
+            "sources": {"$addToSet": "$source"},
+            "chains": {"$addToSet": "$chain_id"},
+        }},
+    ]
+    by_addr = {}
+    async for row in db.wallet_sessions.aggregate(sessions_pipe):
+        addr = row["_id"]
+        by_addr[addr] = {
+            "address": addr,
+            "session_count": row.get("session_count", 0),
+            "first_seen": row.get("first_seen"),
+            "last_seen": row.get("last_seen"),
+            "sources": [s for s in (row.get("sources") or []) if s],
+            "chains": [c for c in (row.get("chains") or []) if c],
+            "purchase_count": 0,
+            "confirmed_count": 0,
+            "pending_count": 0,
+            "failed_count": 0,
+            "total_spent_usd": 0.0,
+        }
+
+    # Aggregate purchases
+    purchases_pipe = [
+        {"$group": {
+            "_id": "$buyer_address",
+            "purchase_count": {"$sum": 1},
+            "confirmed_count": {"$sum": {"$cond": [{"$eq": ["$status", "confirmed"]}, 1, 0]}},
+            "pending_count":   {"$sum": {"$cond": [{"$eq": ["$status", "pending"]}, 1, 0]}},
+            "failed_count":    {"$sum": {"$cond": [{"$eq": ["$status", "failed"]}, 1, 0]}},
+        }},
+    ]
+    async for row in db.purchases.aggregate(purchases_pipe):
+        addr = row["_id"]
+        entry = by_addr.setdefault(addr, {
+            "address": addr,
+            "session_count": 0,
+            "first_seen": None,
+            "last_seen": None,
+            "sources": [],
+            "chains": [],
+            "purchase_count": 0,
+            "confirmed_count": 0,
+            "pending_count": 0,
+            "failed_count": 0,
+            "total_spent_usd": 0.0,
+        })
+        entry["purchase_count"] = row.get("purchase_count", 0)
+        entry["confirmed_count"] = row.get("confirmed_count", 0)
+        entry["pending_count"] = row.get("pending_count", 0)
+        entry["failed_count"] = row.get("failed_count", 0)
+
+    # Sum USDT/USDC totals (only for confirmed purchases)
+    async for p in db.purchases.find({"status": "confirmed", "token_type": {"$in": ["USDT", "USDC"]}}, {"_id": 0, "buyer_address": 1, "amount": 1}):
+        addr = p["buyer_address"]
+        try:
+            by_addr.setdefault(addr, {"address": addr})
+            by_addr[addr]["total_spent_usd"] = round(by_addr[addr].get("total_spent_usd", 0.0) + float(p["amount"]), 2)
+        except (TypeError, ValueError):
+            pass
+
+    out = list(by_addr.values())
+    # Sort: most recent activity first
+    out.sort(key=lambda r: r.get("last_seen") or "", reverse=True)
+    return out
+
 
 # Include the router in the main app
 app.include_router(api_router)
