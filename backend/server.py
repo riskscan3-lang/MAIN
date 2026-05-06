@@ -1209,29 +1209,39 @@ async def admin_update_withdrawal(
 @api_router.get("/admin/debug/rpc")
 async def admin_debug_rpc(
     chain: int = 56,
+    tx: Optional[str] = None,
     x_admin_wallet: Optional[str] = Header(default=None, alias="X-Admin-Wallet"),
 ):
     """Probe each configured RPC for the given chain — used to diagnose
     whether Railway's egress can reach our verifier endpoints. Returns
-    per-endpoint latency + result so we can pinpoint blocked/rate-limited URLs."""
+    per-endpoint latency + result so we can pinpoint blocked/rate-limited URLs.
+    
+    If `tx` is provided, also probes eth_getTransactionReceipt for it.
+    """
     _require_admin(x_admin_wallet)
     urls = RPC_URLS.get(chain) or []
     if isinstance(urls, str):
         urls = [urls]
+    method = "eth_getTransactionReceipt" if tx else "eth_blockNumber"
+    params = [tx] if tx else []
     results = []
     for url in urls:
-        entry = {"url": url, "ok": False, "latency_ms": None, "block_number": None, "error": None}
+        entry = {"url": url, "ok": False, "latency_ms": None, "result_summary": None, "error": None}
         try:
             t0 = datetime.now(timezone.utc)
             async with httpx.AsyncClient(timeout=8.0) as client:
-                r = await client.post(url, json={"jsonrpc": "2.0", "id": 1, "method": "eth_blockNumber", "params": []})
+                r = await client.post(url, json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
             entry["latency_ms"] = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
             entry["http_status"] = r.status_code
             if r.status_code == 200:
                 body = r.json()
                 if "result" in body:
                     entry["ok"] = True
-                    entry["block_number"] = int(body["result"], 16)
+                    if tx:
+                        res = body["result"]
+                        entry["result_summary"] = "null (tx not found)" if res is None else f"status={res.get('status')} block={res.get('blockNumber')}"
+                    else:
+                        entry["result_summary"] = f"block={int(body['result'], 16)}"
                 else:
                     entry["error"] = f"rpc error: {body.get('error')}"
             else:
@@ -1239,7 +1249,7 @@ async def admin_debug_rpc(
         except Exception as e:
             entry["error"] = f"{type(e).__name__}: {e}"
         results.append(entry)
-    return {"chain": chain, "endpoints": results}
+    return {"chain": chain, "method": method, "endpoints": results}
 
 
 @api_router.get("/admin/purchases", response_model=List[Purchase])
