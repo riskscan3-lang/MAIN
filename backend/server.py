@@ -1206,6 +1206,42 @@ async def admin_update_withdrawal(
 
 
 # ---- Admin: purchases & wallet sessions ----
+@api_router.get("/admin/debug/rpc")
+async def admin_debug_rpc(
+    chain: int = 56,
+    x_admin_wallet: Optional[str] = Header(default=None, alias="X-Admin-Wallet"),
+):
+    """Probe each configured RPC for the given chain — used to diagnose
+    whether Railway's egress can reach our verifier endpoints. Returns
+    per-endpoint latency + result so we can pinpoint blocked/rate-limited URLs."""
+    _require_admin(x_admin_wallet)
+    urls = RPC_URLS.get(chain) or []
+    if isinstance(urls, str):
+        urls = [urls]
+    results = []
+    for url in urls:
+        entry = {"url": url, "ok": False, "latency_ms": None, "block_number": None, "error": None}
+        try:
+            t0 = datetime.now(timezone.utc)
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                r = await client.post(url, json={"jsonrpc": "2.0", "id": 1, "method": "eth_blockNumber", "params": []})
+            entry["latency_ms"] = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
+            entry["http_status"] = r.status_code
+            if r.status_code == 200:
+                body = r.json()
+                if "result" in body:
+                    entry["ok"] = True
+                    entry["block_number"] = int(body["result"], 16)
+                else:
+                    entry["error"] = f"rpc error: {body.get('error')}"
+            else:
+                entry["error"] = f"http {r.status_code}: {r.text[:200]}"
+        except Exception as e:
+            entry["error"] = f"{type(e).__name__}: {e}"
+        results.append(entry)
+    return {"chain": chain, "endpoints": results}
+
+
 @api_router.get("/admin/purchases", response_model=List[Purchase])
 async def admin_list_purchases(
     status: Optional[Literal["pending", "confirmed", "failed"]] = None,
